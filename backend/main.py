@@ -13,6 +13,8 @@ from models.database import init_db
 from services.vercel_deployer import get_deployment_status
 from routers.dependencies import router as deps_router
 from routers.env_sheriff import router as sheriff_router
+from routers.pr_risk import router as pr_router
+from routers.auth import router as auth_router
 
 app = FastAPI(title="DeployGuard AI")
 
@@ -25,6 +27,8 @@ app.add_middleware(
 
 app.include_router(deps_router, prefix="/api/deps")
 app.include_router(sheriff_router, prefix="/api/sheriff")
+app.include_router(pr_router, prefix="/api/pr")
+app.include_router(auth_router, prefix="/api/auth")
 
 jobs: dict = {}
 events: dict = {}

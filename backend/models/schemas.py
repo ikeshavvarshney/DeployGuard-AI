@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 from enum import Enum
 
 class JobStatus(str, Enum):
@@ -147,3 +147,87 @@ class EnvSheriffReport(BaseModel):
     remediation_checklist: str
     analyzed_at: str
     exposure_risk: str      # "CRITICAL" | "HIGH" | "MEDIUM" | "LOW"
+
+# ─── PR Risk Scorer ────────────────────────────────────────────────────────────
+
+class DeterministicSummary(BaseModel):
+    files_changed: int
+    lines_added: int
+    lines_deleted: int
+    net_lines: int
+    commits_count: int
+    contributors: List[str]
+    test_files_changed: int
+    source_files_changed: int
+    test_coverage_ratio: float
+    new_dependencies: List[str]
+    removed_dependencies: List[str]
+    critical_files_touched: List[str]
+    critical_files_score: int
+    config_files_changed: int
+    has_lockfile_change: bool
+    largest_file_delta: int
+    binary_files_changed: int
+    file_types: Dict[str, int]
+
+class PRFile(BaseModel):
+    filename: str
+    status: str
+    additions: int
+    deletions: int
+    changes: int
+    criticality_score: int
+    patch_preview: str
+
+class PRCommit(BaseModel):
+    sha: str
+    message: str
+    author: str
+    date: str
+
+class PRContributor(BaseModel):
+    login: str
+    avatar_url: str
+    commits: int
+    additions: int
+    deletions: int
+
+class RiskFactor(BaseModel):
+    factor: str
+    severity: str
+    detail: str
+
+class PRRiskReport(BaseModel):
+    pr_url: str
+    pr_number: int
+    pr_title: str
+    pr_body: str
+    pr_state: str
+    base_branch: str
+    head_branch: str
+    created_at: str
+    updated_at: str
+    is_draft: bool
+    mergeable: Optional[bool]
+    author: PRContributor
+    reviewers: List[str]
+    assignees: List[str]
+    files_changed: int
+    lines_added: int
+    lines_deleted: int
+    commits_count: int
+    comments_count: int
+    files: List[PRFile]
+    commits: List[PRCommit]
+    contributors: List[PRContributor]
+    critical_files: List[str]
+    new_dependencies: List[str]
+    test_coverage_ratio: float
+    risk_score: int
+    verdict: str
+    confidence: str
+    reasons: List[str]
+    risk_factors: List[RiskFactor]
+    suggestions: List[str]
+    merge_url: str
+    analyzed_at: str
