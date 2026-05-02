@@ -112,3 +112,38 @@ class DependencyReport(BaseModel):
     low_count: int
     update_commands: List[UpdateCommand]
     analyzed_at: str
+
+# ─── EnvSheriff — Secret Leak Detector ─────────────────────────────────────────
+
+class RawFinding(BaseModel):
+    file: str           # relative path
+    line: int
+    column: int
+    match: str          # the actual matched string (truncated to 60 chars for safety)
+    pattern_name: str   # "aws_access_key" | "high_entropy" | "hardcoded_password" etc
+    entropy: float      # shannon entropy of the matched value
+    context: str        # surrounding line (sanitized)
+
+class SecretFinding(BaseModel):
+    file: str
+    line: int
+    column: int
+    match_preview: str      # first 20 chars + "..."
+    pattern_name: str
+    entropy: float
+    classification: str     # "REAL_SECRET" | "FALSE_POSITIVE" | "NEEDS_REVIEW"
+    reason: str
+    rotate_immediately: bool
+
+class EnvSheriffReport(BaseModel):
+    repo_url: str
+    scanned_files: int
+    total_findings: int
+    real_secrets: int
+    false_positives: int
+    needs_review: int
+    findings: List[SecretFinding]
+    env_example: str        # full .env.example content
+    remediation_checklist: str
+    analyzed_at: str
+    exposure_risk: str      # "CRITICAL" | "HIGH" | "MEDIUM" | "LOW"
