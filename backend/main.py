@@ -11,6 +11,7 @@ from pipeline.orchestrator import run_pipeline
 from pipeline.deploy_only import run_deploy_only_pipeline
 from models.database import init_db
 from services.vercel_deployer import get_deployment_status
+from routers.dependencies import router as deps_router
 
 app = FastAPI(title="DeployGuard AI")
 
@@ -20,6 +21,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(deps_router, prefix="/api/deps")
 
 jobs: dict = {}
 events: dict = {}
