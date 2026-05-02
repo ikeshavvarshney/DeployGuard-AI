@@ -70,3 +70,45 @@ class PipelineEvent(BaseModel):
     message: str
     data: Optional[dict] = None
     timestamp: float
+
+# ─── Dependency Analyzer ──────────────────────────────────────────────────────
+
+class Dependency(BaseModel):
+    name: str
+    installed_version: str
+    declared_version: str
+    latest_version: str
+    is_outdated: bool
+    ecosystem: str          # "npm" | "pip"
+    is_dev: bool
+    sub_dependencies: List[str] = []   # names only at this stage
+
+class DependencyResult(BaseModel):
+    name: str
+    installed_version: str
+    declared_version: str
+    latest_version: str
+    is_outdated: bool
+    ecosystem: str
+    is_dev: bool
+    sub_dependencies: List["DependencyResult"] = []
+    urgency: str            # "CRITICAL" | "HIGH" | "MEDIUM" | "LOW"
+    reason: str
+    update_command: Optional[str] = None
+
+class UpdateCommand(BaseModel):
+    name: str
+    ecosystem: str
+    command: str
+
+class DependencyReport(BaseModel):
+    repo_url: str
+    frontend_deps: List[DependencyResult]
+    backend_deps: List[DependencyResult]
+    total_outdated: int
+    critical_count: int
+    high_count: int
+    medium_count: int
+    low_count: int
+    update_commands: List[UpdateCommand]
+    analyzed_at: str
