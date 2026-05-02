@@ -24,6 +24,23 @@ export default function LandingPage() {
         >
           Start Analysis
         </button>
+
+        {/* Command Translator Teaser */}
+        <div className="mt-16 bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 max-w-lg w-full flex flex-col items-center text-center animate-in fade-in slide-in-from-bottom-6 duration-1000 delay-300">
+          <div className="bg-[#00ff88]/10 text-[#00ff88] text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider mb-3">
+            New Feature
+          </div>
+          <h3 className="text-xl font-bold text-white mb-2 font-mono">Command Translator</h3>
+          <p className="text-[#666666] text-sm mb-6">
+            English &rarr; Git, SQL, MongoDB, Shell, Docker, npm commands instantly
+          </p>
+          <button
+            onClick={() => router.push('/translate')}
+            className="border border-[#00ff88] text-[#00ff88] font-bold text-sm rounded px-6 py-2 hover:bg-[#00ff88]/10 transition-colors"
+          >
+            Try it &rarr;
+          </button>
+        </div>
       </section>
 
       {/* How It Works Section */}
