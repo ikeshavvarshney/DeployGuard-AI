@@ -1,2 +1,55 @@
 /.env__pycache__/
 *.pyc
+**/__pycache__/
+*.pyc
+.env
+venv/
+__pycache__/
+*.pyc
+# Python
+__pycache__/
+*.py[codz]
+*$py.class
+*$py.pyc
+*.pyd
+*.pyo
+*.p7c
+*.pyc
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Django / FastAPI Specific
+db.sqlite3
+db.sqlite3-shm
+db.sqlite3-wal
+
+# Environment Variables
+.env
+.env.local
+.env.*
+
+# Logs
+*.log
+logs/
+
+# Data
+data/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*~
+
+# Testing
+.coverage
+htmlcov/
+
+# OS generated files
+.DS_Store
+Thumbs.db

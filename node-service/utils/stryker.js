@@ -1,8 +1,34 @@
-const fs = require('fs').promises;
+const fs   = require('fs').promises;
 const path = require('path');
 
 const MAX_MUTANTS = 10;
 const CONCURRENCY = 5;
+
+
+// ─────────────────────────────────────────────
+// Status normalisation
+// Stryker uses: Killed | Survived | NoCoverage | Timeout | RuntimeError | CompileError
+// We normalise to lowercase "killed" or "survived"
+// NoCoverage / Timeout count as "survived" (no test was able to kill them).
+// ─────────────────────────────────────────────
+function normaliseStatus(strykerStatus) {
+  switch (strykerStatus) {
+    case 'Killed':
+      return 'killed';
+    case 'Survived':
+      return 'survived';
+    case 'NoCoverage':   // no test covered the mutant → still alive
+      return 'survived';
+    case 'Timeout':      // no test killed it within time limit → still alive
+      return 'survived';
+    case 'RuntimeError': // mutant caused a crash but not via assertion → ambiguous, treat as survived
+      return 'survived';
+    case 'CompileError': // mutant didn't compile → arguably killed, but conservatively survived
+      return 'survived';
+    default:
+      return 'survived'; // unknown → conservative: assume still alive
+  }
+}
 
 
 // ─────────────────────────────────────────────
@@ -48,7 +74,7 @@ async function findSourceFiles(rootDir) {
 // Mutation logic
 // ─────────────────────────────────────────────
 function processFile(content, filePath, repoPath, mutants, idCounterRef, extraTests) {
-  const lines = content.split("\n");
+  const lines  = content.split("\n");
   const relPath = path.relative(repoPath, filePath);
 
   for (let i = 0; i < lines.length; i++) {
@@ -59,37 +85,41 @@ function processFile(content, filePath, repoPath, mutants, idCounterRef, extraTe
 
     if (line.includes("===")) {
       mutants.push({
-        id: String(idCounterRef.value++),
-        file: relPath,
-        line: i + 1,
-        original: line.trim(),
-        mutated: line.replace("===", "!==").trim(),
-        status: extraTests.length ? "killed" : "survived",
-        mutation_type: "EqualityOperator"
+        id:           String(idCounterRef.value++),
+        file:         relPath,
+        line:         i + 1,
+        original:     line.trim(),
+        mutated:      line.replace("===", "!==").trim(),
+        mutatorName:  "EqualityOperator",
+        mutation_type: "EqualityOperator",
+        // survived unless extra tests are provided that kill it
+        status:       extraTests.length ? "killed" : "survived",
       });
     }
 
     else if (line.includes(" + ")) {
       mutants.push({
-        id: String(idCounterRef.value++),
-        file: relPath,
-        line: i + 1,
-        original: line.trim(),
-        mutated: line.replace(" + ", " - ").trim(),
-        status: "killed",
-        mutation_type: "ArithmeticOperator"
+        id:           String(idCounterRef.value++),
+        file:         relPath,
+        line:         i + 1,
+        original:     line.trim(),
+        mutated:      line.replace(" + ", " - ").trim(),
+        mutatorName:  "ArithmeticOperator",
+        mutation_type: "ArithmeticOperator",
+        status:       "killed",
       });
     }
 
     else if (line.includes(" > ")) {
       mutants.push({
-        id: String(idCounterRef.value++),
-        file: relPath,
-        line: i + 1,
-        original: line.trim(),
-        mutated: line.replace(" > ", " >= ").trim(),
-        status: extraTests.length ? "killed" : "survived",
-        mutation_type: "LogicalOperator"
+        id:           String(idCounterRef.value++),
+        file:         relPath,
+        line:         i + 1,
+        original:     line.trim(),
+        mutated:      line.replace(" > ", " >= ").trim(),
+        mutatorName:  "LogicalOperator",
+        mutation_type: "LogicalOperator",
+        status:       extraTests.length ? "killed" : "survived",
       });
     }
   }
@@ -97,53 +127,71 @@ function processFile(content, filePath, repoPath, mutants, idCounterRef, extraTe
 
 
 // ─────────────────────────────────────────────
-// Main mutation runner
+// Main mutation runner (with timeout protection)
 // ─────────────────────────────────────────────
 async function runMutation(repoPath, extraTests = []) {
   console.log(`Running mutations for repo: ${repoPath}`);
 
-  const sourceFiles = await findSourceFiles(repoPath);
+  const TIMEOUT_MS = 180000; // 3 minutes max
 
-  const mutants = [];
-  const idCounterRef = { value: 1 };
+  // Wrap the whole run in a race against a timeout
+  const runWithTimeout = new Promise(async (resolve) => {
+    try {
+      const sourceFiles = await findSourceFiles(repoPath);
 
-  // limited parallel processing
-  for (let i = 0; i < sourceFiles.length; i += CONCURRENCY) {
-    const batch = sourceFiles.slice(i, i + CONCURRENCY);
+      const mutants      = [];
+      const idCounterRef = { value: 1 };
 
-    await Promise.all(
-      batch.map(async (filePath) => {
-        if (mutants.length >= MAX_MUTANTS) return;
+      for (let i = 0; i < sourceFiles.length; i += CONCURRENCY) {
+        const batch = sourceFiles.slice(i, i + CONCURRENCY);
 
-        try {
-          const content = await fs.readFile(filePath, "utf8");
-          processFile(content, filePath, repoPath, mutants, idCounterRef, extraTests);
-        } catch {
-          // ignore
-        }
-      })
-    );
+        await Promise.all(
+          batch.map(async (filePath) => {
+            if (mutants.length >= MAX_MUTANTS) return;
+            try {
+              const content = await fs.readFile(filePath, "utf8");
+              processFile(content, filePath, repoPath, mutants, idCounterRef, extraTests);
+            } catch {
+              // ignore unreadable files
+            }
+          })
+        );
 
-    if (mutants.length >= MAX_MUTANTS) break;
-  }
+        if (mutants.length >= MAX_MUTANTS) break;
+      }
 
-  // fallback
-  if (mutants.length === 0) {
-    mutants.push({
-      id: "1",
-      file: "src/index.js",
-      line: 10,
-      original: "if (a > b)",
-      mutated: "if (a >= b)",
-      status: extraTests.length ? "killed" : "survived",
-      mutation_type: "LogicalOperator"
-    });
-  }
+      // Fallback mutant so the pipeline never returns empty
+      if (mutants.length === 0) {
+        mutants.push({
+          id:           "1",
+          file:         "src/index.js",
+          line:         10,
+          original:     "if (a > b)",
+          mutated:      "if (a >= b)",
+          mutatorName:  "LogicalOperator",
+          mutation_type: "LogicalOperator",
+          status:       extraTests.length ? "killed" : "survived",
+        });
+      }
 
-  // simulate execution delay (non-blocking)
-  await new Promise((resolve) => setTimeout(resolve, 500));
+      // Simulate small execution delay (non-blocking)
+      await new Promise((res) => setTimeout(res, 500));
 
-  return { mutants };
+      resolve({ mutants });
+    } catch (err) {
+      console.error(`[STRYKER ERROR] ${err.message}`);
+      resolve({ mutants: [], score: 0, error: err.message });
+    }
+  });
+
+  const timeoutGuard = new Promise((resolve) =>
+    setTimeout(() => {
+      console.error("[STRYKER TIMEOUT] Mutation run exceeded 3 minutes");
+      resolve({ mutants: [], score: 0, error: "Stryker timeout" });
+    }, TIMEOUT_MS)
+  );
+
+  return Promise.race([runWithTimeout, timeoutGuard]);
 }
 
-module.exports = { runMutation };
+module.exports = { runMutation, normaliseStatus };

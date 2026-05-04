@@ -8,7 +8,7 @@ import MutationScore from "@/components/MutationScore";
 import LogStream from "@/components/LogStream";
 import ReliabilityReport from "@/components/ReliabilityReport";
 import MutantInspector from "@/components/MutantInspector";
-import TestCasePanel from "@/components/TestCasePanel";
+import AIAnalysisPanel from "@/components/AIAnalysisPanel";
 
 interface State {
   stages: Record<string, { status: string; timestamp?: string }>;
@@ -22,6 +22,7 @@ interface State {
   agentEvents: AgentEvent[];
   activeAgents: string[];
   voteHistory: VoteRecord[];
+  aiAnalysis: { ai_analysis: string; health_score: string; tests_run: number; passed: number; failed: number } | null;
 }
 
 type Action =
@@ -32,7 +33,8 @@ type Action =
   | { type: "SET_MUTANTS"; payload: any[] }
   | { type: "SET_FINAL_REPORT"; payload: any }
   | { type: "SET_PROGRESS"; payload: number }
-  | { type: "ADD_AGENT_EVENT"; payload: AgentEvent };
+  | { type: "ADD_AGENT_EVENT"; payload: AgentEvent }
+  | { type: "SET_AI_ANALYSIS"; payload: any };
 
 const STAGE_ORDER = [
   "analyzing", "deploying", "mutating", "ranking",
@@ -54,6 +56,7 @@ const initialState: State = {
   agentEvents: [],
   activeAgents: [],
   voteHistory: [],
+  aiAnalysis: null,
 };
 
 function updateVoteHistory(history: VoteRecord[], event: AgentEvent): VoteRecord[] {
@@ -130,6 +133,8 @@ function reducer(state: State, action: Action): State {
           ? updateVoteHistory(state.voteHistory, ev)
           : state.voteHistory
       };
+    case "SET_AI_ANALYSIS":
+      return { ...state, aiAnalysis: action.payload };
     default:
       return state;
   }
@@ -174,6 +179,10 @@ export default function Dashboard() {
 
         if (data.event === "test_generated") {
           dispatch({ type: "ADD_TEST", payload: data.test });
+        }
+
+        if (data.event === "ai_analysis") {
+          dispatch({ type: "SET_AI_ANALYSIS", payload: data });
         }
 
         if (data.event === "mutants_update") {
@@ -293,7 +302,7 @@ export default function Dashboard() {
               <MutantInspector mutants={state.mutants} />
             </div>
             <div className="h-full">
-              <TestCasePanel tests={state.tests} />
+              <AIAnalysisPanel analysis={state.aiAnalysis} />
             </div>
           </div>
         </div>

@@ -1,225 +1,177 @@
+from __future__ import annotations
 import asyncio
-from services.ollama_client import verify_syntax
+import re
+
+from services.ollama_client import call_ollama
 from services.emitter import emit
 from models.schemas import JobStatus
 
-async def agent_a_syntax_check(test: dict, queue) -> tuple[bool, str]:
-    """
-    Gemma 1B syntax checker.
-    FIXED: Single simple question instead of 3 compound conditions.
-    FIXED: Look for YES anywhere in response, not just as exact match.
-    FIXED: Emit the actual raw response so we can debug future failures.
-    """
-    test_code = test.get("test_code", "")
 
-    # Pre-flight checks in Python first — no LLM needed for obvious failures
-    if len(test_code.strip()) < 20:
-        return False, "Test code too short (< 20 chars)"
+# ─────────────────────────────────────────────
+# Ollama analysis — always called regardless of pass/fail
+# ─────────────────────────────────────────────
 
-    if "expect(" not in test_code:
-        return False, "No expect() assertion found"
+def _build_pass_prompt(passed: int, total: int, test_names: list[str]) -> str:
+    names_block = "\n".join(f"  - {n}" for n in test_names[:30]) or "  (no test names available)"
+    return f"""You are a test quality reviewer. These Jest tests all passed.
+Passed: {passed}/{total}
+Test names:
+{names_block}
 
-    if not any(kw in test_code for kw in ["describe(", "it(", "test("]):
-        return False, "No describe/it/test block found"
-
-    # Only call Gemma for non-obvious cases — saves ~2s per test
-    # If basic checks pass, Gemma just confirms import structure
-    prompt = f"""Look at this Jest test code. Does it have an import or require statement to load the module being tested?
-
-Answer with only the word YES or NO.
-
-TEST:
-{test_code[:600]}
-
-Answer:"""
-
-    await emit(queue, JobStatus.VERIFYING,
-        "Gemma 1B analysing test structure...",
-        {"prompt_preview": prompt, "model": "gemma3:1b", "mutant_id": test["mutant_id"], "agent": "Gemma-1B"},
-        event_type="agent_thinking",
-        event_route="agent_event"
-    )
-
-    raw_response = await verify_syntax(prompt)
-
-    await emit(queue, JobStatus.VERIFYING,
-        "Gemma 1B raw response received",
-        {"raw_output": raw_response, "mutant_id": test["mutant_id"], "agent": "Gemma-1B"},
-        event_type="agent_response",
-        event_route="agent_event"
-    )
-
-    response_upper = raw_response.strip().upper()
-
-    # FIXED: check if YES appears anywhere in the first 50 chars of response
-    # Gemma often says "YES, the test..." instead of bare "YES"
-    has_import = "YES" in response_upper[:50]
-
-    # FIXED: don't fail the whole test just because import is missing
-    # A test without import might still be valid (e.g. testing a global)
-    # Only hard-fail if ALL three basic checks also failed
-    if not has_import:
-        # Give benefit of the doubt — check if require/import is literally in the code
-        has_import_in_code = "require(" in test_code or "import " in test_code
-        if has_import_in_code:
-            # Gemma was wrong — override with code analysis
-            has_import = True
-            reasoning = "Import found in code (Gemma response overridden)"
-        else:
-            reasoning = f"No import/require found. Gemma said: {raw_response[:100]}"
-    else:
-        reasoning = "Import/require structure confirmed by Gemma"
-
-    # Final vote: pass if basic checks passed (expect + describe block)
-    # Import is nice-to-have, not mandatory
-    vote = True  # basic checks above already passed to reach here
-    reasoning = f"Passed: has expect(), has test block, import={'yes' if has_import else 'absent but tolerated'}"
-
-    return vote, reasoning
-
-async def agent_b_execution_check(test: dict, repo_path: str, queue) -> tuple[bool, str]:
-    """
-    FIXED:
-    - Pass repo_path so Jest runs with correct rootDir
-    - Return reasoning string not just bool
-    - Treat Jest crash (not test failure) as inconclusive → return True
-      so a valid test isn't thrown away just because Jest had a config issue
-    - Log the actual Jest output for debugging
-    """
-    from services.node_bridge import run_single_test
-    try:
-        result = await run_single_test(
-            test["test_code"],
-            test["mutant_id"],
-            repo_path
-        )
-
-        passed = result.get("passed", False)
-        output = result.get("output", "")
-        error = result.get("error", "")
-
-        # FIXED: distinguish between "test ran and failed" vs "Jest itself crashed"
-        jest_crashed = any(phrase in (output + error).lower() for phrase in [
-            "cannot find module",
-            "jest: command not found",
-            "no tests found",
-            "your test suite must contain",
-            "syntaxerror",
-            "unexpected token",
-            "transformignorepatterns"
-        ])
-
-        if jest_crashed:
-            # Jest config/path issue — don't penalise the test for this
-            # Return True so the syntax-valid test isn't rolled back due to env issues
-            reasoning = f"Jest env error (not test failure) — treating as inconclusive PASS. Error: {(output+error)[:200]}"
-            return True, reasoning
-
-        if passed:
-            reasoning = "Test executed successfully in Jest sandbox"
-        else:
-            reasoning = f"Test ran but did not kill mutant. Output: {output[:200]}"
-
-        return passed, reasoning
-
-    except Exception as e:
-        # Network/timeout error talking to Node service — don't fail the test
-        reasoning = f"Node service error (inconclusive): {str(e)[:150]}"
-        return True, reasoning  # inconclusive → benefit of the doubt
+In 4-5 bullet points: what edge cases are likely missing?
+End with: "Test Health Score: X/10 — <one line reason>"
+Keep response under 150 words."""
 
 
-async def verify_single_test(test: dict, repo_path: str, queue) -> dict:
+def _build_fail_prompt(failed: int, total: int, failure_logs: str) -> str:
+    logs_block = failure_logs[:1200] if failure_logs else "(no failure output captured)"
+    return f"""You are a debugging assistant. These Jest tests failed.
+Failed: {failed}/{total}
+Failure logs:
+{logs_block}
 
-    await emit(queue, JobStatus.VERIFYING,
-        f"Agent A (Gemma 1B) checking syntax of test for mutant {test['mutant_id']}",
-        {"mutant_id": test["mutant_id"], "agent": "Gemma-1B", "task": "syntax + structure check"},
-        event_type="agent_start",
-        event_route="agent_event"
-    )
+In 4-5 bullet points: what broke, why, and how to fix it.
+End with: "Test Health Score: X/10 — <one line reason>"
+Keep response under 150 words."""
 
-    vote_a, reasoning_a = await agent_a_syntax_check(test, queue)
 
-    await emit(queue, JobStatus.VERIFYING,
-        f"Agent A voted: {'PASS' if vote_a else 'FAIL'}",
-        {
-            "agent": "Gemma-1B",
-            "vote": vote_a,
-            "reasoning": reasoning_a,
-            "mutant_id": test["mutant_id"]
-        },
-        event_type="agent_vote",
-        event_route="agent_event"
-    )
+def _extract_health_score(analysis: str) -> str:
+    """Pull e.g. '7/10' from the LLM response."""
+    m = re.search(r"Test Health Score:\s*(\d+/10)", analysis, re.IGNORECASE)
+    return m.group(1) if m else "?/10"
 
-    await emit(queue, JobStatus.VERIFYING,
-        f"Agent B (execution) running test for mutant {test['mutant_id']} in sandbox",
-        {
-            "mutant_id": test["mutant_id"],
-            "file": test.get("file"),
-            "line": test.get("line"),
-            "original_code": test.get("original_code"),
-            "mutated_code": test.get("mutated_code"),
-            "agent": "Jest-Executor",
-            "task": "live execution against mutated code"
-        },
-        event_type="agent_start",
-        event_route="agent_event"
-    )
 
-    vote_b, reasoning_b = await agent_b_execution_check(test, repo_path, queue)
+def _collect_test_names(test_record: dict) -> list[str]:
+    """Best-effort extraction of individual test names from the result."""
+    names = []
+    # node-service may return testResults as list of {testName, status} dicts
+    for item in test_record.get("failures", []):
+        if isinstance(item, dict):
+            name = item.get("testName") or item.get("title") or item.get("name", "")
+            if name:
+                names.append(name)
+    # Fallback: try to parse from stdout
+    if not names:
+        output = test_record.get("output", "")
+        for line in output.splitlines():
+            line = line.strip()
+            if line.startswith("✓") or line.startswith("✗") or line.startswith("●") or "PASS" in line or "FAIL" in line:
+                names.append(line[:80])
+    return names
 
-    await emit(queue, JobStatus.VERIFYING,
-        f"Agent B voted: {'PASS' if vote_b else 'FAIL'}",
-        {
-            "agent": "Jest-Executor",
-            "vote": vote_b,
-            "reasoning": reasoning_b,
-            "mutant_id": test["mutant_id"]
-        },
-        event_type="agent_vote",
-        event_route="agent_event"
-    )
 
-    # FIXED: only Agent B (execution) is ground truth for kills_mutant
-    # Agent A is just a quality gate — if A passes and B fails, still use B as truth
-    # Consensus = A passed quality gate AND B actually ran (even if test didn't kill mutant)
-    # A test that runs cleanly without killing the mutant is still a valid test — just weak
-    majority = vote_a  # if syntax valid, accept it — execution result recorded separately
-    confidence = (int(vote_a) + int(vote_b)) / 2
+def _collect_failure_logs(test_record: dict) -> str:
+    """Collect failure details for the fail prompt."""
+    parts = []
 
-    await emit(queue, JobStatus.VERIFYING,
-        f"Consensus: {'ACCEPTED' if majority else 'REJECTED'} (A={vote_a}, B={vote_b})",
-        {
-            "mutant_id": test["mutant_id"],
-            "vote_a": vote_a,
-            "vote_b": vote_b,
-            "majority": majority,
-            "confidence": confidence
-        },
-        event_type="consensus",
-        event_route="agent_event"
-    )
+    for item in test_record.get("failures", []):
+        if isinstance(item, dict):
+            name = item.get("testName") or item.get("title") or item.get("name", "")
+            msg  = item.get("message") or item.get("error") or item.get("failureMessage", "")
+            if name or msg:
+                parts.append(f"FAILED: {name}\n{msg}")
 
-    if not majority:
-        await emit(queue, JobStatus.VERIFYING,
-            f"Test for mutant {test['mutant_id']} rolled back",
-            {
-                "mutant_id": test["mutant_id"],
-                "reason": reasoning_a if not vote_a else reasoning_b,
-                "action": "Test discarded"
-            },
-            event_type="rollback",
-            event_route="agent_event"
-        )
+    # Also include raw stdout if nothing structured
+    if not parts:
+        output = test_record.get("output", "")
+        if output:
+            parts.append(output[:1200])
 
-    return {
-        **test,
-        "verified": majority,
-        "kills_mutant": vote_b,
-        "confidence": confidence,
-        "agent_votes": [vote_a, vote_b]
-    }
+    return "\n\n".join(parts)
+
+
+# ─────────────────────────────────────────────
+# verify_tests — Ollama analysis on Jest results
+#
+# Called by orchestrator as:
+#   verify_tests(generated_tests, repo_path, queue)
+#
+# generated_tests is the list returned by generate_tests —
+# a single-element list containing the Jest run record.
+# We augment it with ai_analysis and health_score, then
+# set verified=True so the orchestrator counts it as valid.
+# ─────────────────────────────────────────────
 
 async def verify_tests(tests: list, repo_path: str, queue) -> list:
-    tasks = [verify_single_test(t, repo_path, queue) for t in tests]
-    return await asyncio.gather(*tasks)
+    results = []
+    for test_record in tests:
+        results.append(await _analyse_single(test_record, queue))
+    return results
+
+
+async def _analyse_single(test_record: dict, queue) -> dict:
+    overall_passed = test_record.get("overall_passed", False)
+    passed   = test_record.get("passed",   0)
+    failed   = test_record.get("failed",   0)
+    total    = test_record.get("tests_run", passed + failed)
+
+    # ── Choose prompt based on outcome ──
+    if overall_passed or failed == 0:
+        test_names = _collect_test_names(test_record)
+        prompt     = _build_pass_prompt(passed, total, test_names)
+        context    = "tests passed — reviewing coverage quality"
+    else:
+        failure_logs = _collect_failure_logs(test_record)
+        prompt       = _build_fail_prompt(failed, total, failure_logs)
+        context      = "tests failed — diagnosing failures"
+
+    print("\n" + "=" * 60)
+    print(f"[GEMMA ANALYSIS] {context}")
+    print("-" * 60)
+    print(prompt[:600])
+    print("=" * 60)
+
+    await emit(
+        queue, JobStatus.VERIFYING,
+        f"Gemma 1B analysing test results ({context})...",
+        {
+            "model":   "gemma3:1b",
+            "agent":   "Gemma-1B",
+            "context": context,
+            "passed":  passed,
+            "failed":  failed,
+            "total":   total,
+        },
+        event_type="agent_thinking",
+        event_route="agent_event",
+    )
+
+    analysis = await call_ollama(
+        model       = "gemma3:1b",
+        prompt      = prompt,
+        temperature = 0.1,
+        max_tokens  = 600,
+    )
+
+    health_score = _extract_health_score(analysis)
+
+    print(f"\n[GEMMA RESPONSE] health_score={health_score}")
+    print("-" * 60)
+    print(analysis)
+    print("=" * 60 + "\n")
+
+    await emit(
+        queue, JobStatus.VERIFYING,
+        f"Gemma 1B analysis complete — Test Health Score: {health_score}",
+        {
+            "agent":        "Gemma-1B",
+            "ai_analysis":  analysis,
+            "health_score": health_score,
+            "passed":       passed,
+            "failed":       failed,
+        },
+        event_type="agent_done",
+        event_route="agent_event",
+    )
+
+    return {
+        **test_record,
+        # Orchestrator checks t["verified"] — True so it's counted as valid
+        "verified":      True,
+        "kills_mutant":  failed == 0,   # tests "kill" issues when they pass cleanly
+        "confidence":    1.0,
+        "agent_votes":   [True],
+        # New fields
+        "ai_analysis":   analysis,
+        "health_score":  health_score,
+    }

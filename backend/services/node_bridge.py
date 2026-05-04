@@ -82,15 +82,34 @@ async def run_tests(repo_path: str) -> dict:
     return result if "passed" in result else {"passed": False, **result}
 
 
-async def run_single_test(test_code: str, mutant_id: str, repo_path: str) -> dict:
+async def run_single_test(
+    test_code: str,
+    mutant_id: str,
+    repo_path: str,
+    use_mutant: bool = False,
+    mutant: dict = None,
+) -> dict:
     """
     Run a single generated test.
+
+    use_mutant=True  → apply the mutation before running, so a correctly killing
+                       test should FAIL (proving it detects the mutation).
+    mutant           → the mutant dict with 'file', 'line', 'original', 'mutated'
+                       fields needed to patch the source temporarily.
     """
     payload = {
-        "testCode": test_code,
-        "mutantId": mutant_id,
-        "repoPath": repo_path
+        "testCode":  test_code,
+        "mutantId":  mutant_id,
+        "repoPath":  repo_path,
+        "useMutant": use_mutant,
     }
+    if use_mutant and mutant:
+        payload["mutant"] = {
+            "file":     mutant.get("file", ""),
+            "line":     mutant.get("line", 0),
+            "original": mutant.get("original", ""),
+            "mutated":  mutant.get("mutated", ""),
+        }
 
     result = await _post("/run-single-test", payload, timeout=30)
 
