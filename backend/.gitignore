@@ -2,6 +2,8 @@
 *.pyc
 .env
 venv/
+__pycache__/
+*.pyc
 # Python
 __pycache__/
 *.py[codz]
