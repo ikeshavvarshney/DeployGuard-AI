@@ -82,13 +82,12 @@ export default function PipelineLoader({ isVisible, currentStep }: PipelineLoade
 
               {/* Label */}
               <span
-                className={`text-sm font-medium transition-colors duration-200 ${
-                  isDone
+                className={`text-sm font-medium transition-colors duration-200 ${isDone
                     ? "text-[#00cc6a]"
                     : isActive
-                    ? "text-white"
-                    : "text-[#444444]"
-                }`}
+                      ? "text-white"
+                      : "text-[#444444]"
+                  }`}
               >
                 {label}
               </span>
