@@ -248,7 +248,13 @@ export default function PRScorerPage() {
   const analyze=async()=>{
     if(!url.trim()){setError("Enter a PR URL");return}
     setLoading(true);setError("");setJobId(null);setReport(null);setStep(0);
-    try{const r=await fetch("/api/proxy/pr/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pr_url:url})});const d=await r.json();if(!d?.job_id)throw new Error("No job_id");setJobId(d.job_id)}catch(e){setError(e instanceof Error?e.message:"Error");setLoading(false)}
+    try{
+      const r=await fetch("/api/proxy/pr/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pr_url:url.trim()})});
+      const d=await r.json();
+      if(!r.ok){throw new Error(d?.detail||d?.error||`Server error ${r.status}`)}
+      if(!d?.job_id){throw new Error(d?.detail||"No job_id returned")}
+      setJobId(d.job_id)
+    }catch(e){setError(e instanceof Error?e.message:"Error");setLoading(false)}
   };
 
   if(report)return<ReportView report={report} onReset={()=>{setReport(null);setUrl("")}}/>;

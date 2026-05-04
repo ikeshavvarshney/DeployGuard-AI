@@ -8,11 +8,12 @@ Routes:
 """
 
 import asyncio
+import traceback
 import uuid
 import re
 import aiohttp
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, field_validator
 from typing import Optional
 
 from services.pr_analyzer import analyze_pr
@@ -25,6 +26,14 @@ class PRRequest(BaseModel):
     pr_url: str
     github_token: Optional[str] = None
 
+    @field_validator("pr_url", mode="before")
+    @classmethod
+    def clean_url(cls, v):
+        """Accept and clean the PR URL — strip whitespace."""
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
 
 class MergeRequest(BaseModel):
     pr_url: str
@@ -33,17 +42,39 @@ class MergeRequest(BaseModel):
 
 
 @router.post("/analyze")
-async def start_analysis(body: PRRequest):
-    # Validate PR URL format
-    if not re.match(r"https://github\.com/[^/]+/[^/]+/pull/\d+", body.pr_url):
-        raise HTTPException(status_code=400, detail="Invalid GitHub PR URL. Expected: https://github.com/owner/repo/pull/123")
+async def start_analysis(request: Request):
+    # Debug: log raw body to terminal for troubleshooting
+    raw = await request.json()
+    print(f"[PR ROUTER] Raw body received: {raw}")
+
+    # Manual validation to give clear error messages
+    pr_url = raw.get("pr_url")
+    if not pr_url:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing 'pr_url' field. Received keys: {list(raw.keys())}. "
+                   f"Expected: {{\"pr_url\": \"https://github.com/owner/repo/pull/123\"}}"
+        )
+
+    pr_url = pr_url.strip()
+    github_token = raw.get("github_token")
+
+    # Validate PR URL format — permissive regex
+    pattern = r"https://github\.com/[\w\-\.]+/[\w\-\.]+/pull/\d+"
+    if not re.match(pattern, pr_url):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid PR URL format. Expected: https://github.com/owner/repo/pull/123. Got: {pr_url}"
+        )
 
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "pending", "result": None, "error": None}
 
     asyncio.get_running_loop().call_soon(
-        lambda: asyncio.create_task(_run_job(job_id, body.pr_url, body.github_token))
+        lambda: asyncio.create_task(_run_job(job_id, pr_url, github_token))
     )
+
+    print(f"[PR ROUTER] Job created: {job_id}")
     return {"job_id": job_id}
 
 
@@ -91,9 +122,14 @@ async def _run_job(job_id: str, pr_url: str, github_token: Optional[str]):
             if job_id in _jobs:
                 _jobs[job_id]["status"] = s
 
+        _update_status("fetching")
+        print(f"[PR ROUTER] Job {job_id} started — fetching {pr_url}")
         report = await analyze_pr(pr_url, github_token=github_token, status_cb=_update_status)
         _jobs[job_id] = {"status": "completed", "error": None, "result": report}
+        print(f"[PR ROUTER] Job {job_id} completed successfully")
 
     except Exception as e:
-        print(f"[PR ROUTER] Job {job_id} failed: {e}")
+        # Print full stack trace for debugging
+        traceback.print_exc()
+        print(f"[PR ROUTER] Job {job_id} FAILED: {e}")
         _jobs[job_id] = {"status": "failed", "error": str(e), "result": None}
