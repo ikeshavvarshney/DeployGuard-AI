@@ -3,9 +3,9 @@ services/env_sheriff_agent.py
 
 EnvSheriff — Secret Leak Detector Pipeline
   clone repo (git clone --depth=1)
-  → walk all files concurrently (2 parallel scanner workers)
+  → walk all files concurrently (6 parallel scanner workers)
   → each file → regex scan + entropy scan → emit findings to asyncio.Queue
-  → consumer: pop 3 findings at a time → batch LLM classification call
+  → consumer: pop 8 findings at a time → batch LLM classification call
   → LLM generates .env.example from all found var names
   → LLM generates remediation checklist ordered by severity
   → return EnvSheriffReport
@@ -24,6 +24,17 @@ from typing import Optional
 
 from models.schemas import RawFinding, SecretFinding, EnvSheriffReport
 from services.ollama_client import get_completion
+
+
+# ─── Constants: Performance Limits ────────────────────────────────────────────
+
+MAX_FILE_SIZE_BYTES = 100_000   # 100KB — skip anything larger
+MAX_FILES_TO_SCAN   = 500       # stop after 500 files
+MAX_CONTEXT_LENGTH  = 120       # chars per finding context line
+MAX_MATCH_LENGTH    = 60        # chars for the matched secret preview
+BATCH_SIZE          = 8         # LLM classification batch size (was 3)
+CONCURRENT_BATCHES  = 6         # concurrent LLM batch calls (was 3)
+SCANNER_SEMAPHORE   = 6         # parallel scanner workers (was 2)
 
 
 # ─── Secret Patterns ──────────────────────────────────────────────────────────
@@ -45,25 +56,55 @@ PATTERNS = {
 # Compiled patterns for performance
 COMPILED_PATTERNS = {name: re.compile(pat) for name, pat in PATTERNS.items()}
 
-# Directories/files to skip
+# ─── BUG 1 FIX: Expanded skip lists + whitelist approach ─────────────────────
+
+# Directories to skip entirely (don't even walk into them)
 SKIP_DIRS = {
-    "node_modules", ".git", "__pycache__", "dist", "build",
-    ".next", ".venv", "venv", "env", ".tox", ".mypy_cache",
-    ".pytest_cache", "coverage", ".nyc_output",
+    "node_modules", ".git", "__pycache__", ".next", ".nuxt",
+    "dist", "build", "out", ".cache", ".turbo", "coverage",
+    ".pytest_cache", ".mypy_cache", "venv", ".venv", "env",
+    ".env", "site-packages", ".tox", "eggs", ".eggs",
+    "htmlcov", ".hypothesis", "target", "vendor", "bower_components",
 }
 
+# Skip files by name (exact match)
+SKIP_FILENAMES = {
+    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+    "requirements.txt", "requirements-dev.txt", "Pipfile", "Pipfile.lock",
+    "poetry.lock", "pyproject.toml", "setup.py", "setup.cfg",
+    "Cargo.toml", "Cargo.lock", "go.sum", "go.mod", "composer.lock",
+    "Gemfile", "Gemfile.lock", ".gitignore", ".gitattributes",
+    ".eslintrc", ".prettierrc", ".editorconfig", ".browserslistrc",
+    "tsconfig.json", "jsconfig.json", "babel.config.js", "jest.config.js",
+    "webpack.config.js", "vite.config.ts", "vite.config.js",
+    "tailwind.config.js", "postcss.config.js", "next.config.js",
+    "README.md", "CHANGELOG.md", "LICENSE", "CONTRIBUTING.md",
+}
+
+# Skip files by extension (blacklist)
 SKIP_EXTENSIONS = {
-    ".lock", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+    ".lock", ".log", ".map", ".min.js", ".min.css",
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".bmp",
     ".woff", ".woff2", ".ttf", ".eot", ".otf",
-    ".mp3", ".mp4", ".wav", ".webm", ".webp",
-    ".zip", ".tar", ".gz", ".bz2", ".7z",
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx",
-    ".pyc", ".pyo", ".so", ".dll", ".exe",
-    ".min.js", ".min.css", ".map",
+    ".pdf", ".zip", ".tar", ".gz", ".rar", ".7z",
+    ".mp4", ".mp3", ".avi", ".mov", ".wav",
+    ".pyc", ".pyo", ".pyd", ".so", ".dylib", ".dll", ".exe",
+    ".bin", ".dat", ".db", ".sqlite", ".sqlite3",
+    ".parquet", ".csv", ".xlsx", ".xls",
 }
 
-# High-entropy token pattern: extract string literals and bare tokens
-TOKEN_RE = re.compile(r"""(?:['"]([^'"]{20,})['"]\s*|=\s*([^\s'"]{20,}))""")
+# Whitelist: only scan these extensions (more reliable than blacklist alone)
+SCAN_EXTENSIONS = {
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs",
+    ".java", ".kt", ".go", ".rb", ".php", ".cs", ".cpp", ".c", ".h",
+    ".rs", ".swift", ".scala", ".sh", ".bash", ".zsh",
+    ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+    ".env.example", ".env.sample", ".env.template",
+    ".tf", ".hcl",   # terraform
+}
+
+# Entropy: only extract string tokens inside quotes on assignment-like lines
+ENTROPY_TOKEN_RE = re.compile(r"""[\"']([A-Za-z0-9+/=_\-]{20,200})[\"']""")
 
 
 # ─── Shannon Entropy ──────────────────────────────────────────────────────────
@@ -77,46 +118,71 @@ def shannon_entropy(s: str) -> float:
     return -sum(p * math.log2(p) for p in freq.values())
 
 
-# ─── File Walking ─────────────────────────────────────────────────────────────
+# ─── File Filtering ──────────────────────────────────────────────────────────
 
-def _should_skip(path: str) -> bool:
-    """Check if a file path should be skipped."""
-    parts = path.replace("\\", "/").split("/")
-    # Skip if any directory component is in SKIP_DIRS
-    for part in parts:
-        if part in SKIP_DIRS:
+def should_skip(path: str, filename: str) -> bool:
+    """Check if a file should be skipped based on name and extension."""
+    ext = os.path.splitext(filename)[1].lower()
+    # check multi-part extensions like .min.js
+    if filename.endswith((".min.js", ".min.css", ".d.ts")):
+        return True
+    return (
+        filename in SKIP_FILENAMES
+        or ext in SKIP_EXTENSIONS
+        or filename.startswith(".")   # hidden files like .DS_Store
+    )
+
+
+def _is_scannable_ext(filename: str) -> bool:
+    """Check if file extension is in the scan whitelist."""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext in SCAN_EXTENSIONS:
+        return True
+    # Handle compound extensions like .env.example
+    for scan_ext in SCAN_EXTENSIONS:
+        if filename.endswith(scan_ext):
             return True
-    # Skip by extension
-    _, ext = os.path.splitext(path)
-    if ext.lower() in SKIP_EXTENSIONS:
-        return True
-    # Skip .min.js / .min.css
-    if path.endswith(".min.js") or path.endswith(".min.css"):
-        return True
     return False
 
 
-def _is_binary(filepath: str) -> bool:
-    """Quick binary file check by reading first 1024 bytes."""
-    try:
-        with open(filepath, "rb") as f:
-            chunk = f.read(1024)
-            return b"\x00" in chunk
-    except Exception:
-        return True
-
+# ─── File Walking ─────────────────────────────────────────────────────────────
 
 def collect_files(repo_path: str) -> list[str]:
-    """Walk repo and collect scannable file paths."""
+    """Walk repo and collect scannable file paths with all guards applied."""
     files = []
+    scanned = 0
+
     for root, dirs, filenames in os.walk(repo_path):
-        # Prune skipped directories in-place
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        # BUG 1 FIX: Prune skip dirs in-place so os.walk never descends
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
+
         for fname in filenames:
+            if scanned >= MAX_FILES_TO_SCAN:
+                break
+
+            # Skip by name/extension (blacklist)
+            if should_skip(root, fname):
+                continue
+
+            # Skip if extension not in whitelist
+            if not _is_scannable_ext(fname):
+                continue
+
             full = os.path.join(root, fname)
-            rel = os.path.relpath(full, repo_path).replace("\\", "/")
-            if not _should_skip(rel) and not _is_binary(full):
-                files.append(full)
+
+            # BUG 2 FIX: Hard file size limit
+            try:
+                if os.path.getsize(full) > MAX_FILE_SIZE_BYTES:
+                    continue
+            except OSError:
+                continue
+
+            files.append(full)
+            scanned += 1
+
+        if scanned >= MAX_FILES_TO_SCAN:
+            break
+
     return files
 
 
@@ -137,31 +203,43 @@ def clone_repo(url: str) -> str:
 
 # ─── Scanner Workers ──────────────────────────────────────────────────────────
 
-def _sanitize_line(line: str) -> str:
-    """Sanitize a line for safe display (truncate long values)."""
-    if len(line) > 200:
-        return line[:200] + "..."
+def _truncate_context(line: str) -> str:
+    """Truncate context line at creation time for memory efficiency."""
+    if len(line) > MAX_CONTEXT_LENGTH:
+        return line[:MAX_CONTEXT_LENGTH] + "..."
     return line
 
 
-def _truncate_match(match: str, max_len: int = 60) -> str:
-    """Truncate matched string for safety."""
-    if len(match) > max_len:
-        return match[:max_len] + "..."
+def _truncate_match(match: str) -> str:
+    """Truncate matched string at creation time for memory efficiency."""
+    if len(match) > MAX_MATCH_LENGTH:
+        return match[:MAX_MATCH_LENGTH] + "..."
     return match
+
+
+def _read_file_sync(filepath: str) -> str:
+    """Read file content synchronously (for use in thread pool)."""
+    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+        return f.read()
 
 
 async def regex_scanner(
     files: list[str],
     repo_path: str,
     queue: asyncio.Queue,
+    semaphore: asyncio.Semaphore,
 ):
-    """Worker 1 — Regex Scanner: match known secret patterns."""
-    for filepath in files:
-        try:
-            rel = os.path.relpath(filepath, repo_path).replace("\\", "/")
-            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                for line_num, line in enumerate(f, start=1):
+    """Regex Scanner: match known secret patterns with concurrent file reads."""
+
+    async def scan_one(filepath: str):
+        async with semaphore:
+            try:
+                rel = os.path.relpath(filepath, repo_path).replace("\\", "/")
+                # BUG 2 FIX: Read file in thread pool, not main event loop
+                content = await asyncio.to_thread(_read_file_sync, filepath)
+                for line_num, line in enumerate(content.splitlines(), start=1):
+                    if len(line) > 2000:   # skip minified lines
+                        continue
                     for pattern_name, compiled in COMPILED_PATTERNS.items():
                         for m in compiled.finditer(line):
                             matched = m.group(0)
@@ -173,47 +251,77 @@ async def regex_scanner(
                                 match=_truncate_match(matched),
                                 pattern_name=pattern_name,
                                 entropy=shannon_entropy(matched),
-                                context=_sanitize_line(line.rstrip()),
+                                context=_truncate_context(line.rstrip()),
                             )
                             await queue.put(finding)
-        except Exception as e:
-            print(f"[SHERIFF REGEX] Error scanning {filepath}: {e}")
+                del content   # BUG 3 FIX: explicit free
+            except Exception as e:
+                print(f"[SHERIFF REGEX] Error scanning {filepath}: {e}")
+
+    tasks = [scan_one(fp) for fp in files]
+    await asyncio.gather(*tasks)
+
+
+def _extract_entropy_tokens(line: str) -> list[str]:
+    """
+    BUG 2 FIX: Tighten entropy scan scope.
+    Only extract quoted string tokens on assignment-like lines.
+    Skip comment lines entirely.
+    """
+    stripped = line.lstrip()
+    # Skip comments
+    if stripped.startswith("#") or stripped.startswith("//"):
+        return []
+    # Only run on lines with assignment/mapping operators or quotes
+    if not any(c in line for c in ("=", ":", '"', "'")):
+        return []
+    return ENTROPY_TOKEN_RE.findall(line)
 
 
 async def entropy_scanner(
     files: list[str],
     repo_path: str,
     queue: asyncio.Queue,
+    semaphore: asyncio.Semaphore,
 ):
-    """Worker 2 — Entropy Scanner: flag high-entropy strings."""
-    for filepath in files:
-        try:
-            rel = os.path.relpath(filepath, repo_path).replace("\\", "/")
-            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                for line_num, line in enumerate(f, start=1):
-                    for m in TOKEN_RE.finditer(line):
-                        token = m.group(1) or m.group(2)
-                        if not token or len(token) < 20:
+    """Entropy Scanner: flag high-entropy quoted strings with concurrent reads."""
+
+    async def scan_one(filepath: str):
+        async with semaphore:
+            try:
+                rel = os.path.relpath(filepath, repo_path).replace("\\", "/")
+                # BUG 2 FIX: Read file in thread pool
+                content = await asyncio.to_thread(_read_file_sync, filepath)
+                for line_num, line in enumerate(content.splitlines(), start=1):
+                    if len(line) > 2000:   # skip minified lines
+                        continue
+                    # BUG 2 FIX: Only extract quoted tokens on relevant lines
+                    tokens = _extract_entropy_tokens(line)
+                    for token in tokens:
+                        if len(token) < 20:
                             continue
                         ent = shannon_entropy(token)
                         if ent > 4.5:
-                            # Skip if it looks like a common non-secret
-                            # (import paths, URLs without credentials, etc.)
-                            if token.startswith("http://") or token.startswith("https://"):
+                            # Skip non-secret URLs without credentials
+                            if token.startswith(("http://", "https://")):
                                 if "@" not in token:
                                     continue
                             finding = RawFinding(
                                 file=rel,
                                 line=line_num,
-                                column=m.start() + 1,
+                                column=line.find(token) + 1,
                                 match=_truncate_match(token),
                                 pattern_name="high_entropy",
                                 entropy=ent,
-                                context=_sanitize_line(line.rstrip()),
+                                context=_truncate_context(line.rstrip()),
                             )
                             await queue.put(finding)
-        except Exception as e:
-            print(f"[SHERIFF ENTROPY] Error scanning {filepath}: {e}")
+                del content   # BUG 3 FIX: explicit free
+            except Exception as e:
+                print(f"[SHERIFF ENTROPY] Error scanning {filepath}: {e}")
+
+    tasks = [scan_one(fp) for fp in files]
+    await asyncio.gather(*tasks)
 
 
 # ─── LLM Classification ──────────────────────────────────────────────────────
@@ -249,7 +357,7 @@ Respond ONLY with JSON array:
         response = await get_completion(
             prompt,
             model_key="reasoning",
-            max_tokens=1024,
+            max_tokens=256,       # BUG 2 FIX: reduced from 1024 — classification output is tiny
             temperature=0.1,
         )
         # Clean response
@@ -273,14 +381,13 @@ Respond ONLY with JSON array:
 
 
 async def classify_all_findings(findings: list[RawFinding]) -> list[SecretFinding]:
-    """Batch-classify all findings, 3 at a time with concurrent LLM calls."""
+    """Batch-classify all findings, 8 at a time with concurrent LLM calls."""
     if not findings:
         return []
 
-    # Split into batches of 3
-    batches = [findings[i:i + 3] for i in range(0, len(findings), 3)]
+    # BUG 2 FIX: Split into batches of 8 (was 3)
+    batches = [findings[i:i + BATCH_SIZE] for i in range(0, len(findings), BATCH_SIZE)]
 
-    # Run up to 3 batch calls concurrently
     results: list[SecretFinding] = []
 
     async def process_batch(batch: list[RawFinding]):
@@ -311,9 +418,9 @@ async def classify_all_findings(findings: list[RawFinding]) -> list[SecretFindin
             ))
         return batch_results
 
-    # Process 3 concurrent batch calls at a time
-    for chunk_start in range(0, len(batches), 3):
-        chunk = batches[chunk_start:chunk_start + 3]
+    # BUG 2 FIX: Process CONCURRENT_BATCHES concurrent batch calls at a time
+    for chunk_start in range(0, len(batches), CONCURRENT_BATCHES):
+        chunk = batches[chunk_start:chunk_start + CONCURRENT_BATCHES]
         batch_tasks = [process_batch(b) for b in chunk]
         chunk_results = await asyncio.gather(*batch_tasks)
         for br in chunk_results:
@@ -489,28 +596,41 @@ async def run_sheriff_pipeline(
         _update_status("scanning")
         repo_path = await asyncio.to_thread(clone_repo, repo_url)
 
-        # 2. Collect scannable files
+        # 2. Collect scannable files (with all guards applied)
         all_files = await asyncio.to_thread(collect_files, repo_path)
         total_files = len(all_files)
-        print(f"[SHERIFF] Found {total_files} scannable files")
+        print(f"[SHERIFF] Found {total_files} scannable files (max {MAX_FILES_TO_SCAN})")
 
-        # 3. Split files between 2 scanner workers
-        mid = len(all_files) // 2
-        regex_files = all_files  # regex scans all files
-        entropy_files = all_files  # entropy scans all files
+        # 3. BUG 2 FIX: Semaphore for 6 concurrent scanner workers (was 2)
+        semaphore = asyncio.Semaphore(SCANNER_SEMAPHORE)
 
-        # 4. Run both scanners concurrently
-        findings_queue: asyncio.Queue = asyncio.Queue()
+        # 4. BUG 3 FIX: Queue with backpressure — scanner blocks if consumer too slow
+        findings_queue: asyncio.Queue = asyncio.Queue(maxsize=200)
 
-        await asyncio.gather(
-            regex_scanner(regex_files, repo_path, findings_queue),
-            entropy_scanner(entropy_files, repo_path, findings_queue),
-        )
-
-        # 5. Collect all findings from queue
+        # 5. Run both scanners concurrently with shared semaphore
+        # BUG 3 FIX: Use producer/consumer pattern instead of gather-all
         raw_findings: list[RawFinding] = []
-        while not findings_queue.empty():
-            raw_findings.append(await findings_queue.get())
+        scan_done = asyncio.Event()
+
+        async def run_scanners():
+            """Producer: run regex + entropy scanners concurrently."""
+            await asyncio.gather(
+                regex_scanner(all_files, repo_path, findings_queue, semaphore),
+                entropy_scanner(all_files, repo_path, findings_queue, semaphore),
+            )
+            scan_done.set()
+
+        async def consume_findings():
+            """Consumer: drain queue as scanners produce findings."""
+            while True:
+                try:
+                    finding = await asyncio.wait_for(findings_queue.get(), timeout=0.5)
+                    raw_findings.append(finding)
+                except asyncio.TimeoutError:
+                    if scan_done.is_set() and findings_queue.empty():
+                        break
+
+        await asyncio.gather(run_scanners(), consume_findings())
 
         # Deduplicate by (file, line, match)
         seen = set()
@@ -521,12 +641,14 @@ async def run_sheriff_pipeline(
                 seen.add(key)
                 deduped.append(f)
         raw_findings = deduped
+        del seen, deduped   # free memory
 
         print(f"[SHERIFF] Found {len(raw_findings)} raw findings (deduped)")
 
         # 6. LLM Classification
         _update_status("classifying")
         classified = await classify_all_findings(raw_findings)
+        del raw_findings   # free memory — no longer needed
 
         # 7. Generate .env.example
         _update_status("generating")

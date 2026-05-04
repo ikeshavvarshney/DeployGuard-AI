@@ -6,6 +6,9 @@ PR Risk Scorer — Pre-Merge Intelligence Pipeline
   → deterministic analysis (file criticality, stats)
   → LLM risk classification (structured summary only, never raw code)
   → build PRRiskReport
+
+Also:
+  parse repo URL → fetch all open/closed PRs → return lightweight list
 """
 
 import asyncio
@@ -33,6 +36,14 @@ def parse_pr_url(url: str) -> tuple[str, str, int]:
     return m.group(1), m.group(2), int(m.group(3))
 
 
+def parse_repo_url(url: str) -> tuple[str, str]:
+    """Extract owner, repo from https://github.com/owner/repo"""
+    m = re.match(r"https://github\.com/([\w\-\.]+)/([\w\-\.]+?)(?:\.git)?/?$", url.strip())
+    if not m:
+        raise ValueError(f"Invalid GitHub repo URL: {url}")
+    return m.group(1), m.group(2)
+
+
 def _build_headers(token: Optional[str] = None) -> dict:
     headers = dict(UA_HEADERS)
     if token:
@@ -46,6 +57,58 @@ async def _gh_get(session: aiohttp.ClientSession, url: str, headers: dict):
             text = await resp.text()
             raise RuntimeError(f"GitHub API {resp.status}: {text[:200]}")
         return await resp.json()
+
+
+# ─── Fetch All PRs for a Repo ────────────────────────────────────────────────
+
+async def fetch_all_prs(repo_url: str, github_token: Optional[str] = None) -> list[dict]:
+    """
+    Fetch all open + recently closed PRs for a repo.
+    Returns lightweight PR list for the navbar display.
+    """
+    owner, repo = parse_repo_url(repo_url)
+    headers = _build_headers(github_token)
+
+    async with aiohttp.ClientSession() as session:
+        # Fetch open + closed PRs concurrently
+        open_url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls?state=open&per_page=50"
+        closed_url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls?state=closed&per_page=30&sort=updated&direction=desc"
+
+        open_resp, closed_resp = await asyncio.gather(
+            _gh_get(session, open_url, headers),
+            _gh_get(session, closed_url, headers),
+        )
+
+    results = []
+    for pr in (open_resp + closed_resp):
+        # Determine if merged (closed PRs may or may not be merged)
+        state = pr.get("state", "open")
+        if state == "closed" and pr.get("merged_at"):
+            state = "merged"
+
+        results.append({
+            "pr_number": pr["number"],
+            "title": pr["title"],
+            "state": state,
+            "is_draft": pr.get("draft", False),
+            "author": pr["user"]["login"],
+            "author_avatar": pr["user"]["avatar_url"],
+            "created_at": pr["created_at"],
+            "updated_at": pr["updated_at"],
+            "base_branch": pr["base"]["ref"],
+            "head_branch": pr["head"]["ref"],
+            "pr_url": pr["html_url"],
+            "comments": pr.get("comments", 0),
+            "review_comments": pr.get("review_comments", 0),
+            "commits": pr.get("commits", 0),
+            "additions": pr.get("additions", 0),
+            "deletions": pr.get("deletions", 0),
+            "changed_files": pr.get("changed_files", 0),
+            "mergeable": pr.get("mergeable"),
+        })
+
+    print(f"[PR ANALYZER] Fetched {len(results)} PRs for {owner}/{repo}")
+    return results
 
 
 # ─── File Criticality Scoring ─────────────────────────────────────────────────
@@ -183,9 +246,14 @@ Classify merge risk and respond ONLY with JSON (no markdown):
   "suggestions": ["actionable suggestion 1", "actionable suggestion 2"]
 }}"""
 
+    raw_output = ""
+    tokens_used = 0
+
     try:
-        response = await get_completion(prompt, model_key="reasoning", max_tokens=1024, temperature=0.1)
-        clean = re.sub(r"```[a-z]*\n?", "", response).strip().strip("`").strip()
+        raw_output = await get_completion(prompt, model_key="reasoning", max_tokens=1024, temperature=0.1)
+        tokens_used = (len(prompt) + len(raw_output)) // 4  # rough estimate
+
+        clean = re.sub(r"```[a-z]*\n?", "", raw_output).strip().strip("`").strip()
         match = re.search(r'\{.*\}', clean, re.DOTALL)
         if match:
             parsed = json.loads(match.group(0))
@@ -199,6 +267,10 @@ Classify merge risk and respond ONLY with JSON (no markdown):
                 "reasons": parsed.get("reasons", [])[:5],
                 "risk_factors": parsed.get("risk_factors", [])[:10],
                 "suggestions": parsed.get("suggestions", [])[:5],
+                "raw_llm_output": raw_output,
+                "tokens_used": tokens_used,
+                "prompt_tokens": len(prompt) // 4,
+                "response_tokens": len(raw_output) // 4,
             }
     except Exception as e:
         print(f"[PR ANALYZER] LLM classification failed: {e}")
@@ -212,6 +284,10 @@ Classify merge risk and respond ONLY with JSON (no markdown):
         "reasons": ["LLM classification unavailable — using heuristic scoring"],
         "risk_factors": [],
         "suggestions": ["Review the PR manually"],
+        "raw_llm_output": raw_output or "(LLM call failed — heuristic fallback used)",
+        "tokens_used": tokens_used,
+        "prompt_tokens": len(prompt) // 4 if prompt else 0,
+        "response_tokens": 0,
     }
 
 
@@ -317,6 +393,10 @@ def build_report(
         "reasons": risk["reasons"],
         "risk_factors": risk.get("risk_factors", []),
         "suggestions": risk.get("suggestions", []),
+        "raw_llm_output": risk.get("raw_llm_output", ""),
+        "tokens_used": risk.get("tokens_used", 0),
+        "prompt_tokens": risk.get("prompt_tokens", 0),
+        "response_tokens": risk.get("response_tokens", 0),
         "merge_url": f"{GITHUB_API}/repos/{owner}/{repo}/pulls/{pr_number}/merge",
         "analyzed_at": datetime.now(timezone.utc).isoformat(),
     }
