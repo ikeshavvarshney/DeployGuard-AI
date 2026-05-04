@@ -18,8 +18,7 @@ from routers.env_sheriff import router as sheriff_router
 from routers.pr_risk import router as pr_router
 from routers.auth import router as auth_router
 
-app = FastAPI(title="DeployGuard AI")
-
+app = FastAPI(title="DeployGuard AI", redirect_slashes=False)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

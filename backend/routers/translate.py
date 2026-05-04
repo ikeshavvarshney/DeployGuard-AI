@@ -40,6 +40,7 @@ def extract_json_from_response(text: str):
         return None
 
 @router.post("/")
+@router.post("")
 async def translate_command(req: TranslateRequest):
     sys_prompt = get_system_prompt(req.category)
     prompt = f"{sys_prompt}\n\nUser Query: {req.query}"
