@@ -4,18 +4,18 @@ import React from "react";
 export default function ReliabilityReport({ report, isComplete }: { report: any, isComplete: boolean }) {
   if (!isComplete) {
     return (
-      <div className="bg-gradient-to-br from-[var(--surface-color)] to-[var(--bg-color)] border border-[var(--border-color)] rounded-xl p-6 shadow-xl relative overflow-hidden">
-         <h2 className="text-xl font-bold mb-6 text-[var(--text-muted-color)] flex items-center gap-2">
-          <span className="text-[var(--text-muted-color)]">★</span> Final Report
+      <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-5 relative overflow-hidden">
+         <h2 className="text-xs font-bold mb-5 text-[#888888] uppercase tracking-wider flex items-center gap-2">
+          <span className="text-[#444444]">★</span> Final Report
         </h2>
-        <div className="space-y-6">
-          <div className="flex justify-between items-center pb-4 border-b border-[var(--border-color)]">
-             <span className="text-[var(--text-muted-color)]">Reliability Grade</span>
-             <div className="w-16 h-8 bg-[var(--surface-2-color)] rounded animate-pulse"></div>
+        <div className="space-y-4">
+          <div className="flex justify-between items-center pb-3 border-b border-[#1a1a1a]">
+             <span className="text-[#888888] text-sm">Reliability Grade</span>
+             <div className="w-16 h-6 bg-[#1a1a1a] rounded animate-pulse" />
           </div>
-          <div className="flex justify-between items-center pb-4 border-b border-[var(--border-color)]">
-             <span className="text-[var(--text-muted-color)]">Final Score</span>
-             <div className="w-12 h-6 bg-[var(--surface-2-color)] rounded animate-pulse"></div>
+          <div className="flex justify-between items-center pb-3 border-b border-[#1a1a1a]">
+             <span className="text-[#888888] text-sm">Final Score</span>
+             <div className="w-12 h-5 bg-[#1a1a1a] rounded animate-pulse" />
           </div>
         </div>
       </div>
@@ -36,40 +36,40 @@ export default function ReliabilityReport({ report, isComplete }: { report: any,
   const scoreDecimal = finalScore / 100;
   
   let confidenceLevel = "LOW";
-  let confidenceColor = "text-[var(--danger-color)]";
+  let confidenceColor = "text-[#ff4444]";
   
   if (scoreDecimal >= 0.8) {
     confidenceLevel = "HIGH";
-    confidenceColor = "text-[var(--accent-color)]";
+    confidenceColor = "text-[#00ff88]";
   } else if (scoreDecimal >= 0.6) {
     confidenceLevel = "MEDIUM";
-    confidenceColor = "text-[var(--warning-color)]";
+    confidenceColor = "text-[#ffaa00]";
   }
 
   return (
-    <div className="bg-gradient-to-br from-[var(--surface-color)] to-[var(--bg-color)] border border-[var(--primary-color)]/30 rounded-xl p-6 shadow-[0_0_30px_rgba(108,99,255,0.1)] transition-all duration-500 animate-in fade-in zoom-in-95">
-      <h2 className="text-xl font-bold mb-6 text-[var(--text-primary-color)] flex items-center gap-2">
-        <span className="text-[var(--primary-color)]">★</span> Final Report
+    <div className="bg-[#111111] border border-[#00ff88]/20 rounded-xl p-5 transition-all duration-200 animate-fadeInUp">
+      <h2 className="text-xs font-bold mb-5 text-white uppercase tracking-wider flex items-center gap-2">
+        <span className="text-[#00ff88]">★</span> Final Report
       </h2>
       
-      <div className="space-y-4">
-        <div className="flex justify-between items-center pb-4 border-b border-[var(--border-color)]">
-          <span className="text-[var(--text-muted-color)]">Reliability Grade</span>
-          <span className={`text-2xl font-bold ${confidenceColor} animate-pulse`}>{confidenceLevel}</span>
+      <div className="space-y-3">
+        <div className="flex justify-between items-center pb-3 border-b border-[#1a1a1a]">
+          <span className="text-[#888888] text-sm">Reliability Grade</span>
+          <span className={`text-xl font-bold ${confidenceColor}`}>{confidenceLevel}</span>
         </div>
         
-        <div className="flex justify-between items-center pb-4 border-b border-[var(--border-color)]">
-          <span className="text-[var(--text-muted-color)]">Final Score</span>
-          <span className="text-2xl font-mono text-[var(--text-primary-color)]">{finalScore}%</span>
+        <div className="flex justify-between items-center pb-3 border-b border-[#1a1a1a]">
+          <span className="text-[#888888] text-sm">Final Score</span>
+          <span className="text-xl font-mono text-white">{finalScore}%</span>
         </div>
 
-        <div className="pt-2">
-          <span className="text-[var(--text-muted-color)] block mb-2 text-sm">Deployment URL</span>
+        <div className="pt-1">
+          <span className="text-[#888888] block mb-2 text-xs uppercase tracking-wider">Deployment URL</span>
           <a 
             href={report.deployment_url || "#"} 
             target="_blank" 
             rel="noreferrer"
-            className="block w-full p-3 bg-[var(--code-bg-color)] border border-[var(--border-color)] rounded text-[var(--primary-color)] font-mono text-sm hover:border-[var(--primary-color)] hover:shadow-[0_0_10px_rgba(108,99,255,0.2)] transition-all truncate"
+            className="block w-full p-2.5 bg-[#0a0a0a] border border-[#1a1a1a] rounded-lg text-[#00ff88] font-mono text-xs hover:border-[#00ff88] transition-all duration-200 truncate"
           >
             {report.deployment_url || "Deployment Failed or Unavailable"}
           </a>

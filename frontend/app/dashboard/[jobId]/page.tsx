@@ -9,6 +9,8 @@ import LogStream from "@/components/LogStream";
 import ReliabilityReport from "@/components/ReliabilityReport";
 import MutantInspector from "@/components/MutantInspector";
 import AIAnalysisPanel from "@/components/AIAnalysisPanel";
+import PipelineLoader from "@/components/PipelineLoader";
+import DualOutputPanel from "@/components/DualOutputPanel";
 
 interface State {
   stages: Record<string, { status: string; timestamp?: string }>;
@@ -145,6 +147,7 @@ export default function Dashboard() {
   const jobId = params.jobId as string;
   const [state, dispatch] = useReducer(reducer, initialState);
   const [showObservatory, setShowObservatory] = useState(false);
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     if (!jobId) return;
@@ -154,6 +157,8 @@ export default function Dashboard() {
     sse.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+
+        if (!connected) setConnected(true);
 
         if (data.event_type) {
           dispatch({ type: "ADD_AGENT_EVENT", payload: data });
@@ -221,35 +226,36 @@ export default function Dashboard() {
   }, [jobId]);
 
   const isComplete = state.stages["completed"]?.status === "done" || state.stages["failed"]?.status === "failed";
+  const rawLogOutput = state.logs.join("\n");
 
   return (
-    <div className="min-h-screen bg-[var(--bg-color)] text-[var(--text-primary-color)] p-6 font-sans">
+    <div className="min-h-screen bg-[#0a0a0a] text-white p-4 sm:p-6">
       {/* Header */}
-      <div className="mb-8 border-b border-[var(--border-color)] pb-4 flex justify-between items-end animate-in fade-in slide-in-from-top-4">
+      <div className="mb-6 border-b border-[#1a1a1a] pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 animate-fadeInUp max-w-[1600px] mx-auto">
         <div>
-          <h1 className="text-3xl font-bold font-mono tracking-tighter text-[var(--primary-color)]">
-            DeployGuard Pipeline
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+            Deploy<span className="text-[#00ff88]">Guard</span> Pipeline
           </h1>
-          <p className="text-[var(--text-muted-color)] font-mono text-sm mt-1">Job ID: {jobId}</p>
+          <p className="text-[#444444] font-mono text-xs mt-1">Job ID: {jobId}</p>
         </div>
-        <div className="flex gap-4 items-center">
+        <div className="flex gap-3 items-center">
           <button
-            className="lg:hidden px-3 py-1 bg-[var(--surface-2-color)] border border-[var(--border-color)] rounded text-xs font-mono text-[var(--text-primary-color)] hover:border-[var(--primary-color)] transition-colors"
+            className="lg:hidden px-3 py-1.5 bg-[#111111] border border-[#1a1a1a] rounded-lg text-xs font-mono text-white hover:border-[#00ff88] transition-all duration-200"
             onClick={() => setShowObservatory(!showObservatory)}
           >
-            {showObservatory ? "Hide Agent Observatory" : "Show Agent Observatory"}
+            {showObservatory ? "Hide Observatory" : "Show Observatory"}
           </button>
           {state.stages["failed"]?.status === "failed" ? (
-            <span className="inline-block px-3 py-1 bg-[var(--danger-color)]/20 text-[var(--danger-color)] rounded text-sm font-mono border border-[var(--danger-color)]/50 shadow-[0_0_10px_var(--danger-color)]">
-              STATUS: FAILED
+            <span className="inline-block px-3 py-1.5 bg-[#ff4444]/10 text-[#ff4444] rounded-lg text-xs font-mono font-bold border border-[#ff4444]/30">
+              FAILED
             </span>
           ) : isComplete ? (
-            <span className="inline-block px-3 py-1 bg-[var(--accent-color)]/20 text-[var(--accent-color)] rounded text-sm font-mono border border-[var(--accent-color)]/50 shadow-[0_0_10px_var(--accent-color)]">
-              STATUS: COMPLETE
+            <span className="inline-block px-3 py-1.5 bg-[#00ff88]/10 text-[#00ff88] rounded-lg text-xs font-mono font-bold border border-[#00ff88]/30">
+              COMPLETE
             </span>
           ) : (
-            <span className="inline-block px-3 py-1 bg-[var(--warning-color)]/20 text-[var(--warning-color)] rounded text-sm font-mono border border-[var(--warning-color)]/50 shadow-[0_0_10px_var(--warning-color)] animate-pulse">
-              STATUS: RUNNING
+            <span className="inline-block px-3 py-1.5 bg-[#ffaa00]/10 text-[#ffaa00] rounded-lg text-xs font-mono font-bold border border-[#ffaa00]/30 animate-pulse">
+              RUNNING
             </span>
           )}
         </div>
@@ -257,58 +263,71 @@ export default function Dashboard() {
 
       {/* Error Banner */}
       {state.stages["failed"]?.status === "failed" && (
-        <div className="max-w-[1600px] mx-auto mb-6 bg-[var(--danger-color)]/10 border border-[var(--danger-color)] text-[var(--danger-color)] p-4 rounded-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4">
+        <div className="max-w-[1600px] mx-auto mb-6 bg-[#ff4444]/5 border border-[#ff4444]/20 text-[#ff4444] p-4 rounded-xl flex items-center gap-3 animate-fadeInUp">
           <span className="text-xl">⚠️</span>
           <div>
-            <h3 className="font-bold">Pipeline Execution Failed</h3>
-            <p className="text-sm opacity-90">{state.logs[state.logs.length - 1] || "An unknown error occurred during execution."}</p>
+            <h3 className="font-bold text-sm">Pipeline Execution Failed</h3>
+            <p className="text-sm opacity-80">{state.logs[state.logs.length - 1] || "An unknown error occurred during execution."}</p>
           </div>
         </div>
       )}
 
-      {/* Progress Bar */}
-      <div className="max-w-[1600px] mx-auto mb-8 animate-in fade-in">
-        <div className="flex justify-between items-end mb-2">
-          <span className="text-sm font-mono text-[var(--primary-color)]">Pipeline Progress</span>
-          <span className="text-sm font-mono text-[var(--text-primary-color)]">{state.progress}%</span>
+      {/* Initial connection loader */}
+      {!connected && (
+        <div className="max-w-[1600px] mx-auto mb-6">
+          <PipelineLoader isVisible={!connected} />
         </div>
-        <div className="w-full h-3 bg-[var(--surface-color)] rounded-full overflow-hidden border border-[var(--border-color)]">
+      )}
+
+      {/* Progress Bar */}
+      <div className="max-w-[1600px] mx-auto mb-6 animate-fadeInUp-1">
+        <div className="flex justify-between items-end mb-2">
+          <span className="text-xs font-mono text-[#888888]">Pipeline Progress</span>
+          <span className="text-xs font-mono text-white">{state.progress}%</span>
+        </div>
+        <div className="w-full h-2 bg-[#1a1a1a] rounded-full overflow-hidden">
           <div
-            className="h-full bg-[var(--primary-color)] transition-all duration-500 ease-out relative shadow-[0_0_15px_var(--primary-color)]"
+            className="h-full bg-[#00ff88] transition-all duration-500 ease-out relative rounded-full"
             style={{ width: `${state.progress}%` }}
           >
-            <div className="absolute top-0 bottom-0 left-0 right-0 bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.3),transparent)] animate-[shimmer_2s_infinite]"></div>
+            <div className="absolute inset-0 bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.2),transparent)] animate-[shimmer_2s_infinite]" />
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[280px_1fr_340px] gap-6 max-w-[1600px] mx-auto">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[280px_1fr_340px] gap-4 max-w-[1600px] mx-auto">
 
         {/* LEFT COLUMN: Pipeline & Logs */}
-        <div className="space-y-6 flex flex-col h-[calc(100vh-200px)]">
+        <div className="space-y-4 flex flex-col h-[calc(100vh-220px)] animate-fadeInUp-2">
           <PipelineStatus stages={state.stages} />
           <LogStream logs={state.logs} />
         </div>
 
         {/* CENTER COLUMN: Dashboard Details */}
-        <div className="space-y-6 overflow-y-auto h-[calc(100vh-200px)] pr-2 scrollbar-thin">
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="space-y-4 overflow-y-auto h-[calc(100vh-220px)] pr-1 custom-scroll animate-fadeInUp-3">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <MutationScore scoreBefore={state.mutationScoreBefore} scoreAfter={state.mutationScoreAfter} />
             <ReliabilityReport report={state.finalReport} isComplete={isComplete} />
           </div>
 
-          <div className="grid grid-cols-1 gap-6 h-[600px]">
-            <div className="h-full">
-              <MutantInspector mutants={state.mutants} />
-            </div>
-            <div className="h-full">
-              <AIAnalysisPanel analysis={state.aiAnalysis} />
-            </div>
+          <div className="grid grid-cols-1 gap-4">
+            <MutantInspector mutants={state.mutants} />
+            <AIAnalysisPanel analysis={state.aiAnalysis} />
           </div>
+
+          {/* Dual output panel for final report */}
+          {isComplete && state.finalReport && (
+            <DualOutputPanel
+              rawOutput={rawLogOutput}
+              parsedContent={
+                <ReliabilityReport report={state.finalReport} isComplete={isComplete} />
+              }
+            />
+          )}
         </div>
 
         {/* RIGHT COLUMN: Agent Observatory */}
-        <div className={`lg:block ${showObservatory ? 'block' : 'hidden'} h-[calc(100vh-200px)]`}>
+        <div className={`lg:block ${showObservatory ? 'block' : 'hidden'} h-[calc(100vh-220px)] animate-fadeInUp-4`}>
           <AgentObservatory
             events={state.agentEvents}
             voteHistory={state.voteHistory}

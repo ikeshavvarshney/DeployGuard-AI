@@ -11,8 +11,8 @@ const STAGE_LABELS: Record<string, string> = {
   deploying: "Initial Deployment",
   mutating: "Running Mutations",
   ranking: "Ranking Mutants",
-  generating: "Generating Tests",
-  verifying: "Verifying Tests",
+  generating: "Running Tests",
+  verifying: "AI Analysis",
   fixing: "Fixing Issues",
   scoring: "Scoring Reliability",
   completed: "Pipeline Complete",
@@ -28,9 +28,9 @@ export default function PipelineStatus({ stages }: { stages: Record<string, { st
     : STAGE_ORDER;
 
   return (
-    <div className="bg-[var(--surface-color)] border border-[var(--border-color)] rounded-xl p-6 shadow-xl transition-all duration-300 hover:scale-[1.01]">
-      <h2 className="text-lg font-bold mb-4 text-[var(--text-muted-color)] font-mono">Pipeline Progress</h2>
-      <div className="space-y-4">
+    <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-5 transition-all duration-200">
+      <h2 className="text-xs font-bold mb-4 text-[#888888] uppercase tracking-wider">Pipeline Progress</h2>
+      <div className="space-y-3">
         {displayStages.map((stageId, idx) => {
           const s = stages[stageId] || { status: "pending" };
           const isActive = s.status === "active";
@@ -40,27 +40,26 @@ export default function PipelineStatus({ stages }: { stages: Record<string, { st
           return (
             <div 
               key={stageId} 
-              className="flex items-center gap-4 animate-in fade-in slide-in-from-left-2"
-              style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}
+              className="flex items-center gap-3"
             >
-              <div className="w-8 flex justify-center">
+              <div className="w-6 flex justify-center">
                 {isDone && !isFailed ? (
-                  <div className="w-6 h-6 rounded-full bg-[var(--accent-color)]/20 border border-[var(--accent-color)] flex items-center justify-center text-[var(--accent-color)] text-xs shadow-[0_0_10px_var(--accent-color)]">✓</div>
+                  <div className="w-5 h-5 rounded-full bg-[#00ff88]/15 border border-[#00ff88]/40 flex items-center justify-center text-[#00ff88] text-[10px]">✓</div>
                 ) : isFailed ? (
-                  <div className="w-6 h-6 rounded-full bg-[var(--danger-color)]/20 border border-[var(--danger-color)] flex items-center justify-center text-[var(--danger-color)] text-xs shadow-[0_0_10px_var(--danger-color)]">✕</div>
+                  <div className="w-5 h-5 rounded-full bg-[#ff4444]/15 border border-[#ff4444]/40 flex items-center justify-center text-[#ff4444] text-[10px]">✕</div>
                 ) : isActive ? (
-                  <div className="w-6 h-6 rounded-full border-2 border-[var(--primary-color)] border-t-transparent animate-spin shadow-[0_0_10px_var(--primary-color)]"></div>
+                  <div className="w-5 h-5 rounded-full border-2 border-[#00ff88] border-t-transparent animate-spin" />
                 ) : (
-                  <div className="w-6 h-6 rounded-full border border-[var(--border-color)] bg-[var(--surface-2-color)]"></div>
+                  <div className="w-4 h-4 rounded-full border border-[#1a1a1a] bg-[#0a0a0a]" />
                 )}
               </div>
               <div className="flex-1">
-                <div className={`font-medium transition-colors duration-300 ${isActive || isDone ? "text-[var(--text-primary-color)]" : "text-[var(--text-muted-color)]"}`}>
+                <div className={`text-sm font-medium transition-colors duration-200 ${isActive || isDone ? "text-white" : "text-[#444444]"}`}>
                   {STAGE_LABELS[stageId] || stageId}
                 </div>
               </div>
-              <div className="text-xs font-mono text-[var(--text-muted-color)]">
-                {s.timestamp || "---"}
+              <div className="text-[10px] font-mono text-[#444444]">
+                {s.timestamp || ""}
               </div>
             </div>
           );

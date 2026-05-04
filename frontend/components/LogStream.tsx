@@ -9,25 +9,25 @@ export default function LogStream({ logs }: { logs: string[] }) {
   }, [logs]);
 
   return (
-    <div className="bg-[var(--code-bg-color)] border border-[var(--border-color)] rounded-xl flex-1 flex flex-col overflow-hidden shadow-2xl transition-all duration-300 hover:scale-[1.01]">
-      <div className="bg-[var(--surface-color)] px-4 py-2 border-b border-[var(--border-color)] flex items-center gap-2">
-        <div className="w-3 h-3 rounded-full bg-[var(--danger-color)] hover:opacity-80 transition-opacity"></div>
-        <div className="w-3 h-3 rounded-full bg-[var(--warning-color)] hover:opacity-80 transition-opacity"></div>
-        <div className="w-3 h-3 rounded-full bg-[var(--accent-color)] hover:opacity-80 transition-opacity"></div>
-        <span className="ml-2 text-xs font-mono text-[var(--text-muted-color)] tracking-wider">deployguard-pty</span>
+    <div className="bg-[#0d0d0d] border border-[#1a1a1a] rounded-xl flex-1 flex flex-col overflow-hidden transition-all duration-200">
+      <div className="bg-[#111111] px-4 py-2 border-b border-[#1a1a1a] flex items-center gap-2">
+        <div className="w-2.5 h-2.5 rounded-full bg-[#ff4444]" />
+        <div className="w-2.5 h-2.5 rounded-full bg-[#ffaa00]" />
+        <div className="w-2.5 h-2.5 rounded-full bg-[#00ff88]" />
+        <span className="ml-2 text-[10px] font-mono text-[#444444] tracking-wider">deployguard-pty</span>
       </div>
-      <div className="p-4 flex-1 overflow-y-auto font-mono text-sm space-y-1 h-full min-h-[200px]">
+      <div className="p-4 flex-1 overflow-y-auto font-mono text-xs space-y-0.5 h-full min-h-[200px] custom-scroll">
         {logs.length === 0 && (
-          <div className="text-[var(--text-muted-color)] italic opacity-50">Waiting for logs...</div>
+          <div className="text-[#444444] italic text-xs">Waiting for logs...</div>
         )}
         {logs.map((log, i) => {
           const isError = log.includes("ERROR") || log.includes("failed") || log.includes("Failed");
           return (
             <div 
               key={i} 
-              className={`animate-in fade-in duration-300 ${isError ? "text-[var(--danger-color)]" : "text-[var(--accent-color)]"}`}
+              className={`leading-relaxed ${isError ? "text-[#ff4444]" : "text-[#00ff88]/80"}`}
             >
-              <span className="text-[var(--text-muted-color)] mr-3 opacity-50 select-none">~</span>
+              <span className="text-[#333333] mr-2 select-none">~</span>
               {log}
             </div>
           );

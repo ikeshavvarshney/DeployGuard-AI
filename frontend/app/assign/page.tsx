@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, useCallback, KeyboardEvent } from "react";
 import { Users, Loader2, AlertCircle, ChevronRight, Zap } from "lucide-react";
 import ContributorCard, { type Contributor } from "../../components/ContributorCard";
+import PipelineLoader from "../../components/PipelineLoader";
+import DualOutputPanel from "../../components/DualOutputPanel";
 import { Inter, JetBrains_Mono } from "next/font/google";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -37,8 +39,8 @@ interface AssignmentResult {
 function ConfidenceBadge({ level }: { level: string }) {
   const cfg: Record<string, { color: string; bg: string }> = {
     HIGH: { color: "#00ff88", bg: "rgba(0,255,136,0.1)" },
-    MEDIUM: { color: "#ffcc00", bg: "rgba(255,204,0,0.1)" },
-    LOW: { color: "#ff4d6d", bg: "rgba(255,77,109,0.1)" },
+    MEDIUM: { color: "#ffaa00", bg: "rgba(255,170,0,0.1)" },
+    LOW: { color: "#ff4444", bg: "rgba(255,68,68,0.1)" },
   };
   const { color, bg } = cfg[level] ?? cfg.MEDIUM;
   return (
@@ -105,18 +107,15 @@ function AssignmentCard({
   const [avatarFailed, setAvatarFailed] = useState(false);
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-4">
+    <div className="animate-fadeInUp space-y-4">
       {/* Main result card */}
-      <div
-        className="bg-[#0d0d0d] rounded-r-lg p-5 relative"
-        style={{ borderLeft: "4px solid #00ff88", borderTop: "1px solid #1a1a1a", borderRight: "1px solid #1a1a1a", borderBottom: "1px solid #1a1a1a" }}
-      >
+      <div className="bg-[#111111] border border-[#1a1a1a] border-l-4 border-l-[#00ff88] rounded-r-xl p-5 relative">
         {/* Confidence badge top-right */}
         <div className="absolute top-4 right-4">
           <ConfidenceBadge level={confidence} />
         </div>
 
-        <p className="text-[#666666] text-xs uppercase tracking-widest mb-3">Assigned to</p>
+        <p className="text-[#888888] text-xs uppercase tracking-widest mb-3">Assigned to</p>
 
         {/* Assignee identity */}
         <div className="flex items-center gap-3 mb-4">
@@ -136,7 +135,7 @@ function AssignmentCard({
           )}
           <div>
             <p className="text-white font-bold text-lg leading-tight">{assignee.name || assignee.username}</p>
-            <p className="text-[#666666] text-sm">@{assignee.username}</p>
+            <p className="text-[#888888] text-sm">@{assignee.username}</p>
           </div>
         </div>
 
@@ -164,18 +163,18 @@ function AssignmentCard({
           {assignee.email ? (
             <a
               href={mailtoHref}
-              className="flex-1 text-center border border-[#00ff88] text-[#00ff88] font-bold text-sm rounded px-4 py-2 hover:bg-[#00ff88]/10 transition-colors"
+              className="flex-1 text-center border border-[#00ff88] text-[#00ff88] font-bold text-sm rounded-lg px-4 py-2.5 hover:bg-[#00ff88]/10 transition-all duration-200"
             >
               Send Task via Email
             </a>
           ) : (
-            <div className="flex-1 text-center border border-[#333333] text-[#444444] text-sm rounded px-4 py-2 cursor-not-allowed">
+            <div className="flex-1 text-center border border-[#1a1a1a] text-[#444444] text-sm rounded-lg px-4 py-2.5 cursor-not-allowed">
               No email provided
             </div>
           )}
           <button
             onClick={onReassign}
-            className="px-4 py-2 border border-[#333333] text-[#666666] text-sm rounded hover:border-[#555555] hover:text-white transition-colors"
+            className="px-4 py-2.5 border border-[#1a1a1a] text-[#888888] text-sm rounded-lg hover:border-[#00ff88] hover:text-white transition-all duration-200"
           >
             Reassign
           </button>
@@ -184,9 +183,9 @@ function AssignmentCard({
 
       {/* Other candidates */}
       {others.length > 0 && (
-        <div className="bg-[#111111] border border-[#1a1a1a] rounded-lg p-4">
-          <p className="text-[#666666] text-xs uppercase tracking-widest mb-3">Other candidates</p>
-          <div className="space-y-2">
+        <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-4">
+          <p className="text-[#888888] text-xs uppercase tracking-widest mb-3">Other candidates</p>
+          <div className="space-y-2.5">
             {others.map((r) => (
               <div key={r.username} className="flex items-center gap-3">
                 <MiniAvatar
@@ -204,7 +203,7 @@ function AssignmentCard({
                       style={{ width: `${Math.round(r.score * 100)}%` }}
                     />
                   </div>
-                  <span className="text-[#666666] text-xs w-8 text-right">{Math.round(r.score * 100)}%</span>
+                  <span className="text-[#888888] text-xs w-8 text-right font-mono">{Math.round(r.score * 100)}%</span>
                 </div>
               </div>
             ))}
@@ -228,11 +227,23 @@ export default function AssignPage() {
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [result, setResult] = useState<AssignmentResult | null>(null);
+  const [rawAssignResponse, setRawAssignResponse] = useState("");
 
   const taskSectionRef = useRef<HTMLDivElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
 
   const hasReadyContributor = contributors.some((c) => c.email.trim().length > 0);
+
+  // ── localStorage persistence for repo URL ──
+  useEffect(() => {
+    const saved = localStorage.getItem("deployguard_last_repo");
+    if (saved) setRepoUrl(saved);
+  }, []);
+
+  const handleRepoUrlChange = (value: string) => {
+    setRepoUrl(value);
+    localStorage.setItem("deployguard_last_repo", value);
+  };
 
   // ── Fetch contributors ──
   const handleFetch = async () => {
@@ -283,6 +294,7 @@ export default function AssignPage() {
     setAssignLoading(true);
     setAssignError(null);
     setResult(null);
+    setRawAssignResponse("");
 
     try {
       const payload = {
@@ -305,6 +317,7 @@ export default function AssignPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || data.error || `Error ${res.status}`);
       setResult(data as AssignmentResult);
+      setRawAssignResponse(JSON.stringify(data, null, 2));
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
     } catch (err: unknown) {
       setAssignError(err instanceof Error ? err.message : "Assignment failed");
@@ -322,34 +335,33 @@ export default function AssignPage() {
 
   return (
     <div className={`${inter.className} min-h-screen bg-[#0a0a0a] pb-24`}>
-      <div className="max-w-3xl mx-auto px-4 pt-16 space-y-10">
+      <div className="max-w-3xl mx-auto px-4 pt-12 space-y-8">
 
         {/* ── Hero heading ── */}
-        <div className="text-center">
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 flex items-center justify-center gap-2">
-            Task Assigner
-            <span className="w-4 h-9 bg-[#00ff88] animate-pulse inline-block" />
+        <div className="text-center animate-fadeInUp">
+          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 tracking-tight">
+            Task <span className="text-[#00ff88]">Assigner</span>
           </h1>
-          <p className="text-[#666666] text-lg">
+          <p className="text-[#888888] text-lg">
             Fetch your repo contributors, add their skills, assign tasks with AI
           </p>
         </div>
 
         {/* ── Repo input card ── */}
-        <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 space-y-3">
+        <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-6 space-y-3 animate-fadeInUp-1">
           <label className="text-[#888888] text-xs uppercase tracking-widest block">GitHub Repository</label>
           <input
             type="url"
             value={repoUrl}
-            onChange={(e) => setRepoUrl(e.target.value)}
+            onChange={(e) => handleRepoUrlChange(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleFetch()}
             placeholder="https://github.com/owner/repo"
-            className={`${jetbrains.className} w-full bg-[#0a0a0a] border rounded px-4 py-3 text-white text-sm placeholder-[#444444] focus:outline-none focus:ring-1 transition-colors ${
-              fetchError ? "border-red-500 focus:border-red-500 focus:ring-red-500/20" : "border-[#1a1a1a] focus:border-[#00ff88] focus:ring-[#00ff88]/20"
+            className={`${jetbrains.className} w-full bg-[#0a0a0a] border rounded-lg px-4 py-3 text-white text-sm placeholder-[#444444] focus:outline-none focus:ring-1 transition-all duration-200 ${
+              fetchError ? "border-[#ff4444] focus:border-[#ff4444] focus:ring-[#ff4444]/20" : "border-[#1a1a1a] focus:border-[#00ff88] focus:ring-[#00ff88]/20"
             }`}
           />
           {fetchError && (
-            <div className="flex items-start gap-2 text-red-400 text-sm">
+            <div className="flex items-start gap-2 text-[#ff4444] text-sm">
               <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
               <span>{fetchError}</span>
             </div>
@@ -357,7 +369,7 @@ export default function AssignPage() {
           <button
             onClick={handleFetch}
             disabled={fetchLoading || !repoUrl.trim()}
-            className="w-full bg-[#00ff88] text-black font-bold py-3 rounded hover:bg-[#00cc6a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full bg-[#00ff88] text-black font-bold py-3 rounded-lg hover:bg-[#00cc6a] transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {fetchLoading ? (
               <>
@@ -373,11 +385,14 @@ export default function AssignPage() {
           </button>
         </div>
 
+        {/* Pipeline Loader for fetch */}
+        <PipelineLoader isVisible={fetchLoading} />
+
         {/* ── Contributors section ── */}
         {contributors.length > 0 && (
-          <section className="space-y-4">
+          <section className="space-y-4 animate-fadeInUp">
             <div className="flex items-center gap-3">
-              <h2 className="text-xl font-bold text-white">Contributors</h2>
+              <h2 className="text-xl font-bold text-white tracking-tight">Contributors</h2>
               <span className="bg-[#00ff88]/10 text-[#00ff88] text-xs font-bold px-2 py-0.5 rounded-full border border-[#00ff88]/20">
                 {contributors.length}
               </span>
@@ -396,14 +411,14 @@ export default function AssignPage() {
             <button
               onClick={handleContinue}
               disabled={!hasReadyContributor}
-              className="w-full bg-[#00ff88] text-black font-bold py-3 rounded flex items-center justify-center gap-2 hover:bg-[#00cc6a] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="w-full bg-[#00ff88] text-black font-bold py-3 rounded-lg flex items-center justify-center gap-2 hover:bg-[#00cc6a] transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Continue to Task Assignment
               <ChevronRight className="w-4 h-4" />
             </button>
             {!hasReadyContributor && (
-              <p className="text-center text-[#555555] text-xs">
-                Add at least one contributor's email to continue
+              <p className="text-center text-[#444444] text-xs">
+                Add at least one contributor&apos;s email to continue
               </p>
             )}
           </section>
@@ -411,20 +426,28 @@ export default function AssignPage() {
 
         {/* ── Task assignment section ── */}
         {showTask && (
-          <section ref={taskSectionRef} className="space-y-4 scroll-mt-20">
-            <h2 className="text-xl font-bold text-white">Describe the Task</h2>
+          <section ref={taskSectionRef} className="space-y-4 scroll-mt-20 animate-fadeInUp">
+            <h2 className="text-xl font-bold text-white tracking-tight">Describe the Task</h2>
 
-            <textarea
-              value={task}
-              onChange={(e) => setTask(e.target.value)}
-              onKeyDown={handleTaskKeyDown}
-              placeholder="Describe the feature or task in plain English... e.g. Build a Redis caching layer for mutation results"
-              rows={4}
-              className={`${jetbrains.className} w-full bg-[#111111] border border-[#1a1a1a] rounded-lg px-4 py-3 text-white text-sm placeholder-[#444444] resize-none focus:outline-none focus:border-[#00ff88] focus:ring-1 focus:ring-[#00ff88]/20 transition-colors`}
-            />
+            <div className="bg-[#111111] border border-[#1a1a1a] rounded-xl p-4">
+              <textarea
+                value={task}
+                onChange={(e) => setTask(e.target.value)}
+                onKeyDown={handleTaskKeyDown}
+                placeholder="Describe the feature or task in plain English... e.g. Build a Redis caching layer for mutation results"
+                rows={4}
+                className={`${jetbrains.className} w-full bg-[#0a0a0a] border border-[#1a1a1a] rounded-lg px-4 py-3 text-white text-sm placeholder-[#444444] resize-none focus:outline-none focus:border-[#00ff88] focus:ring-1 focus:ring-[#00ff88]/20 transition-all duration-200`}
+              />
+              <div className="flex justify-between items-center mt-2">
+                <span className="text-[10px] text-[#444444] font-mono">{task.length} chars</span>
+                <span className="text-[10px] text-[#444444]">
+                  {typeof navigator !== "undefined" && navigator?.platform?.toLowerCase().includes("mac") ? "⌘" : "Ctrl"} + Enter to assign
+                </span>
+              </div>
+            </div>
 
             {assignError && (
-              <div className="flex items-start gap-2 text-red-400 text-sm bg-red-500/5 border border-red-500/20 rounded p-3">
+              <div className="flex items-start gap-2 text-[#ff4444] text-sm bg-[#ff4444]/5 border border-[#ff4444]/20 rounded-lg p-3">
                 <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                 <span>{assignError}</span>
               </div>
@@ -433,12 +456,12 @@ export default function AssignPage() {
             <button
               onClick={handleAssign}
               disabled={assignLoading || !task.trim()}
-              className="w-full bg-[#00ff88] text-black font-bold py-3 rounded flex items-center justify-center gap-2 hover:bg-[#00cc6a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-[#00ff88] text-black font-bold py-3 rounded-lg flex items-center justify-center gap-2 hover:bg-[#00cc6a] transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {assignLoading ? (
                 <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   <span className={`${jetbrains.className} text-sm`}>AI is analyzing contributor skills</span>
-                  <span className="w-2 h-5 bg-black animate-pulse inline-block ml-1" />
                 </>
               ) : (
                 <>
@@ -447,11 +470,11 @@ export default function AssignPage() {
                 </>
               )}
             </button>
-            <p className="text-center text-[#444444] text-xs">
-              {navigator?.platform?.toLowerCase().includes("mac") ? "⌘" : "Ctrl"} + Enter to assign
-            </p>
           </section>
         )}
+
+        {/* Pipeline Loader for assign */}
+        <PipelineLoader isVisible={assignLoading} />
 
         {/* ── Assignment result ── */}
         {result && (
@@ -463,7 +486,22 @@ export default function AssignPage() {
               onReassign={() => {
                 setResult(null);
                 setAssignError(null);
+                setRawAssignResponse("");
               }}
+            />
+
+            <DualOutputPanel
+              rawOutput={rawAssignResponse}
+              parsedContent={
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase tracking-wider text-[#888888]">Assignee:</span>
+                    <span className="text-white font-medium text-sm">{result.assignee.name || result.assignee.username}</span>
+                    <ConfidenceBadge level={result.confidence} />
+                  </div>
+                  <p className="text-sm text-[#888888] leading-relaxed">{result.reason}</p>
+                </div>
+              }
             />
           </div>
         )}
