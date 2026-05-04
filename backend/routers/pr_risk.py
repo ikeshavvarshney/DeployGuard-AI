@@ -2,9 +2,10 @@
 routers/pr_risk.py
 
 Routes:
-  POST /api/pr/analyze         → start PR analysis job, return job_id
-  GET  /api/pr/status/{job_id} → poll job status + result
-  POST /api/pr/merge           → merge PR via GitHub API (requires token)
+  POST /api/pr/repo/prs          → fetch all PRs for a repo (fast, no LLM)
+  POST /api/pr/analyze            → start PR analysis job, return job_id
+  GET  /api/pr/status/{job_id}    → poll job status + result
+  POST /api/pr/merge              → merge PR via GitHub API (requires token)
 """
 
 import asyncio
@@ -13,26 +14,23 @@ import uuid
 import re
 import aiohttp
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 from typing import Optional
 
-from services.pr_analyzer import analyze_pr
+from services.pr_analyzer import analyze_pr, fetch_all_prs
 
 router = APIRouter()
 _jobs: dict = {}
 
 
-class PRRequest(BaseModel):
-    pr_url: str
+class RepoRequest(BaseModel):
+    repo_url: str
     github_token: Optional[str] = None
 
-    @field_validator("pr_url", mode="before")
-    @classmethod
-    def clean_url(cls, v):
-        """Accept and clean the PR URL — strip whitespace."""
-        if isinstance(v, str):
-            return v.strip()
-        return v
+
+class PRAnalyzeRequest(BaseModel):
+    pr_url: str
+    github_token: Optional[str] = None
 
 
 class MergeRequest(BaseModel):
@@ -41,13 +39,48 @@ class MergeRequest(BaseModel):
     commit_message: Optional[str] = None
 
 
+# ─── Fetch all PRs for a repo (fast, no LLM) ─────────────────────────────────
+
+@router.post("/repo/prs")
+async def get_repo_prs(request: Request):
+    """Returns list of all PRs for navbar display. No job needed — fast GitHub API call only."""
+    raw = await request.json()
+    print(f"[PR ROUTER] /repo/prs body: {raw}")
+
+    repo_url = raw.get("repo_url")
+    if not repo_url:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing 'repo_url' field. Received keys: {list(raw.keys())}"
+        )
+
+    repo_url = repo_url.strip()
+    github_token = raw.get("github_token")
+
+    # Validate repo URL
+    if not re.match(r"https://github\.com/[\w\-\.]+/[\w\-\.]+", repo_url):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid repo URL. Expected: https://github.com/owner/repo. Got: {repo_url}"
+        )
+
+    try:
+        prs = await fetch_all_prs(repo_url, github_token)
+        return {"prs": prs, "repo_url": repo_url}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Start PR analysis job ────────────────────────────────────────────────────
+
 @router.post("/analyze")
 async def start_analysis(request: Request):
-    # Debug: log raw body to terminal for troubleshooting
     raw = await request.json()
-    print(f"[PR ROUTER] Raw body received: {raw}")
+    print(f"[PR ROUTER] /analyze body: {raw}")
 
-    # Manual validation to give clear error messages
     pr_url = raw.get("pr_url")
     if not pr_url:
         raise HTTPException(
@@ -59,7 +92,7 @@ async def start_analysis(request: Request):
     pr_url = pr_url.strip()
     github_token = raw.get("github_token")
 
-    # Validate PR URL format — permissive regex
+    # Validate PR URL format
     pattern = r"https://github\.com/[\w\-\.]+/[\w\-\.]+/pull/\d+"
     if not re.match(pattern, pr_url):
         raise HTTPException(
@@ -78,6 +111,8 @@ async def start_analysis(request: Request):
     return {"job_id": job_id}
 
 
+# ─── Poll job status ──────────────────────────────────────────────────────────
+
 @router.get("/status/{job_id}")
 async def get_status(job_id: str):
     job = _jobs.get(job_id)
@@ -85,6 +120,8 @@ async def get_status(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 
+
+# ─── Merge PR ─────────────────────────────────────────────────────────────────
 
 @router.post("/merge")
 async def merge_pr(body: MergeRequest):
@@ -116,7 +153,9 @@ async def merge_pr(body: MergeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _run_job(job_id: str, pr_url: str, github_token: Optional[str]):
+# ─── Background job runner ───────────────────────────────────────────────────
+
+async def _run_job(job_id: str, pr_url: str, github_token: Optional[str] = None):
     try:
         def _update_status(s: str):
             if job_id in _jobs:
@@ -129,7 +168,6 @@ async def _run_job(job_id: str, pr_url: str, github_token: Optional[str]):
         print(f"[PR ROUTER] Job {job_id} completed successfully")
 
     except Exception as e:
-        # Print full stack trace for debugging
         traceback.print_exc()
         print(f"[PR ROUTER] Job {job_id} FAILED: {e}")
         _jobs[job_id] = {"status": "failed", "error": str(e), "result": None}

@@ -229,5 +229,29 @@ class PRRiskReport(BaseModel):
     reasons: List[str]
     risk_factors: List[RiskFactor]
     suggestions: List[str]
+    raw_llm_output: str = ""         # exact string returned by LLM before parsing
+    tokens_used: int = 0             # estimated total tokens
+    prompt_tokens: int = 0           # estimated prompt tokens
+    response_tokens: int = 0         # estimated response tokens
     merge_url: str
     analyzed_at: str
+
+class PRListItem(BaseModel):
+    pr_number: int
+    title: str
+    state: str               # "open" | "closed" | "merged"
+    is_draft: bool
+    author: str
+    author_avatar: str
+    created_at: str
+    updated_at: str
+    base_branch: str
+    head_branch: str
+    pr_url: str
+    comments: int
+    review_comments: int = 0
+    commits: int
+    additions: int
+    deletions: int
+    changed_files: int
+    mergeable: Optional[bool] = None
