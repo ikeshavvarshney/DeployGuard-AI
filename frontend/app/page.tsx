@@ -47,7 +47,7 @@ export default function LandingPage() {
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <button
-              onClick={() => router.push("/scan")}
+              onClick={() => router.push("/prscorer")}
               className="bg-[#00ff88] text-black font-bold text-base rounded-lg px-8 py-3.5 hover:bg-[#00cc6a] transition-all duration-200 hover:-translate-y-0.5 shadow-[0_0_20px_rgba(0,255,136,0.15)]"
             >
               Start Pipeline
@@ -144,7 +144,7 @@ export default function LandingPage() {
           We don&apos;t just deploy apps. We prove they work.
         </p>
         <a
-          href="https://github.com"
+          href="https://github.com/ikeshavvarshney/DeployGuard-AI"
           target="_blank"
           rel="noreferrer"
           className="text-[#444444] text-xs font-mono hover:text-[#00ff88] transition-colors"

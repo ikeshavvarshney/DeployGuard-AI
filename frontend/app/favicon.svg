@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00ff9c"/>
+      <stop offset="100%" stop-color="#00c97a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="64" height="64" rx="14" fill="#0b0f14"/>
+
+  <!-- Shield -->
+  <path d="M32 10 L50 18 V30 C50 42 42 50 32 54 C22 50 14 42 14 30 V18 Z"
+        fill="none"
+        stroke="url(#grad)"
+        stroke-width="3"/>
+
+  <!-- Letter D -->
+  <text x="32" y="38"
+        text-anchor="middle"
+        font-family="Arial, sans-serif"
+        font-size="22"
+        font-weight="bold"
+        fill="url(#grad)">
+    D
+  </text>
+</svg>
