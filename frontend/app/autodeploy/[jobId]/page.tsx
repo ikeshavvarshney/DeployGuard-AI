@@ -29,8 +29,7 @@ export default function AutoDeployStreamingPage() {
   useEffect(() => {
     if (!jobId) return;
 
-    const sse = new EventSource(`http://localhost:8000/api/jobs/${jobId}/stream`);
-
+    const sse = new EventSource(`https://deployguard.duckdns.org/api/jobs/${jobId}/stream`);
     sse.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
