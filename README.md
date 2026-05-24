@@ -1,230 +1,286 @@
-# 🚀 DeployGuard AI
+# DeployGuard AI
 
-> Local-first, AI-powered DevOps platform built with sub-billion parameter models.
+> Local-first, AI-powered DevOps automation platform — built on sub-billion parameter models.
 
----
+DeployGuard AI automates the highest-friction parts of engineering workflows: deployments, PR reviews, dependency audits, secret detection, and task assignment — using small, efficient LLMs instead of heavyweight cloud APIs.
 
-## 🧠 Overview
-
-DeployGuard AI is a developer operations platform designed to automate high-friction engineering workflows — deployments, PR reviews, dependency audits, and more — using **small, efficient LLMs** instead of massive cloud-based models.
-
-Built under strict constraints (few billion parameters max), DeployGuard proves that **architecture > brute force**.
+The core thesis: **architecture beats brute force**. Every feature runs a structured multi-stage pipeline that constrains and validates model output, rather than blindly trusting a raw LLM response.
 
 ---
 
-## ⚡ Key Highlights
+## What It Does
 
-- 🧩 Runs on **sub-billion parameter models**
-- 🔒 Fully **local-first** (no forced cloud APIs)
-- ⚡ **Low latency** with parallel inference
-- 🧠 Intelligent pipeline with validation + caching
-- 📊 Transparent outputs (raw + parsed + token usage)
-
----
-
-## 🏗️ Architecture
-
-Every request goes through a **6-stage pipeline**:
-
-1. **Prompt Restructuring** – Normalize + enrich user input  
-2. **RAG (Retrieval Augmented Generation)** – Inject relevant context  
-3. **Parallel Inference** – Multiple LLM calls simultaneously  
-4. **Validation Layer** – Ensure correctness + format  
-5. **Caching** – Avoid redundant token usage  
-6. **Ensemble Merging** – Combine outputs into high-confidence result  
+| Feature | Description |
+|---|---|
+| **AutoDeploy** | Paste a GitHub repo URL → framework detection → config generation → Vercel deployment → failure debugging |
+| **PR Review Agent** | Fetches PRs, scores merge readiness, flags bugs and breaking changes |
+| **Command Translator** | Natural language → Git / Docker / SQL CLI commands |
+| **Dependency Audit** | Full dependency graph scan with Critical / High / Medium / Low risk classification |
+| **Env Sheriff** | Detects leaked secrets in repos, filters false positives via LLM, generates `.env.example` |
+| **AI Task Assignment** | Matches tasks to best contributors using GitHub history + skill inference, drafts assignment email |
 
 ---
 
-## 🤖 Models Used
+## Architecture
+
+Every request flows through a **6-stage pipeline**:
+
+```
+User Input
+    │
+    ▼
+┌──────────────────────────────────────────────────────────┐
+│  1. Prompt Restructuring  — normalize + enrich input     │
+│  2. RAG Retrieval         — inject relevant context      │
+│  3. Parallel Inference    — multiple LLM calls           │
+│  4. Validation Layer      — correctness + format checks  │
+│  5. Caching               — skip redundant token usage   │
+│  6. Ensemble Merging      — combine into final output    │
+└──────────────────────────────────────────────────────────┘
+    │
+    ▼
+Structured JSON response streamed to frontend via SSE
+```
+
+### Models
 
 | Task | Model | Size |
-|------|------|------|
-| Reasoning | Qwen3 | ~0.6B |
-| Code Generation | Gemma3 | ~1B |
+|---|---|---|
+| Reasoning / analysis | Qwen3 | ~0.6B |
+| Code generation | Gemma3 | ~1B |
+
+Both run locally via **Ollama** — no cloud API required.
 
 ---
 
-## 🔥 Core Features
+## Stack
 
-### 🚀 AutoDeploy
-- Paste GitHub repo → automatic deployment
-- Detects framework + generates config
-- Debugs failures with actionable fixes
-
----
-
-### 🔍 PR Review Agent
-- Analyzes pull requests with:
-  - Diff breakdown
-  - Merge readiness scoring
-  - Risk detection (bugs, breaking changes)
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js (App Router), TypeScript, TailwindCSS |
+| Backend | Python, FastAPI, asyncio |
+| Node Service | Express.js (Jest execution + custom mutation engine) |
+| LLM Runtime | Ollama |
+| Deployment target | Vercel (automated via backend) |
 
 ---
 
-### 💻 Command Translation
-- Natural language → CLI commands
-- Supports Git, Docker, SQL, etc.
-- Fast + deterministic (no hallucination)
+## Services & Ports
+
+| Service | Port | Description |
+|---|---|---|
+| Frontend (Next.js) | `http://localhost:3000` | Main dashboard UI |
+| Backend (FastAPI) | `http://localhost:8000` | API + pipeline orchestration |
+| Node Service (Express) | `http://localhost:3001` | Jest runner + mutation testing engine |
+| Ollama | `http://localhost:11434` | Local LLM inference |
 
 ---
 
-### 📦 Dependency Audit
-- Scans full dependency graph
-- Classifies risk levels:
-  - Critical
-  - High
-  - Medium
-  - Low
+## Getting Started
 
----
+### Prerequisites
 
-### 🧑‍🤝‍🧑 AI Task Assignment
-- Matches tasks → best contributors
-- Uses contribution history + skill inference
-- Generates ready-to-send email draft
+- Node.js 18+
+- Python 3.10–3.12
+- [Ollama](https://ollama.ai) installed and running
 
----
-
-### 🔐 Env Sheriff
-- Detects leaked secrets in repos
-- Filters false positives using LLM classification
-- Generates `.env.example` automatically
-
----
-
-## 🖥️ Frontend
-
-Built with:
-- **Next.js (App Router)**
-- **TypeScript**
-- **TailwindCSS**
-
-### Key Capabilities:
-- Real-time pipeline monitoring (SSE)
-- Interactive dashboards
-- AI observability panels
-- Mutation testing visualization
-
-📄 Detailed frontend architecture: :contentReference[oaicite:0]{index=0}
-
----
-
-## 🔌 Backend (Conceptual)
-
-- FastAPI-based orchestration
-- Event-driven pipeline execution
-- Streaming via SSE
-- Modular agent system
-
----
-
-## 🔄 Data Flow
-
-1. User submits repo
-2. Backend creates job
-3. Frontend connects via SSE
-4. Live updates streamed:
-   - Logs
-   - Stages
-   - AI outputs
-5. Reducer updates UI in real-time
-
----
-
-## 📂 Project Structure
-
-```
-frontend/
-app/
-components/
-lib/
-public/
-
-backend/
-api/
-pipeline/
-models/
-```
-
-
----
-
-## 🧪 Example Use Cases
-
-- 🚀 One-click deployment for junior devs  
-- 🔍 Automated PR triaging for large teams  
-- 🔐 Security auditing for open-source repos  
-- 📊 Dev productivity optimization  
-
----
-
-## 🎯 Why This Matters
-
-Most AI tools rely on massive models and cloud APIs.
-
-DeployGuard AI proves:
-> You don’t need trillion-parameter models to build powerful developer tools.
-
-You need:
-- Smart architecture
-- Efficient pipelines
-- Focused problem-solving
-
----
-
-## 🏁 Demo Script
-
-Full 5-minute walkthrough script:  
-📄 :contentReference[oaicite:1]{index=1}
-
----
-
-## 🚧 Roadmap
-
-- Multi-cloud deployment support
-- Advanced CI/CD integrations
-- Team collaboration features
-- Plugin ecosystem
-
----
-
-## 🛠️ Setup (Basic)
+### 1. Pull LLM models
 
 ```bash
-# frontend
+ollama pull qwen3:0.6b
+ollama pull gemma3:1b
+```
+
+### 2. Frontend
+
+```bash
 cd frontend
 npm install
 npm run dev
+# Runs on http://localhost:3000
+```
 
-# backend
+### 3. Backend
+
+```bash
 cd backend
 pip install -r requirements.txt
 uvicorn main:app --reload
+# Runs on http://localhost:8000
+```
 
+### 4. Node Service
+
+```bash
+cd node-service
+npm install
+node index.js
+# Runs on http://localhost:3001
 ```
 
 ---
 
-## 🤝 Contributing
+## Environment Variables
 
-Contributions are welcome — but keep the bar high.
+### `backend/.env`
 
-- Adhere to the existing architecture and design patterns  
-- Maintain modular, scalable code  
-- Avoid unnecessary complexity or over-engineering  
+```env
+# Ollama
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL_REASONING=qwen3:0.6b
+OLLAMA_MODEL_CODE=gemma3:1b
 
-Low-quality or inconsistent contributions will not be merged.
+# GitHub (required for PR Review and Task Assignment)
+GITHUB_TOKEN=your_github_personal_access_token
+
+# Vercel (required for AutoDeploy)
+VERCEL_TOKEN=your_vercel_token
+
+# Node Service
+NODE_SERVICE_URL=http://localhost:3001
+
+# Optional
+LOG_LEVEL=INFO
+```
+
+### `frontend/.env.local`
+
+```env
+# Backend API base URL (proxied through Next.js)
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
 
 ---
 
-## 📜 License
+## Project Structure
 
-This project is licensed under the MIT License.
+```
+deployguard-ai/
+├── frontend/
+│   ├── app/                  # Next.js App Router pages
+│   │   ├── page.tsx          # Landing page
+│   │   ├── scan/             # Pipeline entry point
+│   │   ├── dashboard/[jobId] # Real-time monitoring
+│   │   ├── dependencies/     # Dependency audit
+│   │   ├── envsheriff/       # Secret detection
+│   │   ├── assign/           # Task assignment
+│   │   ├── translate/        # Command translation
+│   │   ├── prscorer/         # PR risk analysis
+│   │   └── api/proxy/        # API proxy (avoids CORS)
+│   ├── components/           # UI components
+│   └── lib/                  # API wrappers + utilities
+│
+├── backend/
+│   ├── main.py               # FastAPI entry point, routes, job lifecycle
+│   ├── pipeline/
+│   │   └── orchestrator.py   # 9-stage pipeline state machine
+│   ├── agents/               # repo_analyzer, deploy_planner, verifier, fixer, etc.
+│   ├── services/             # ollama_client, vercel_deployer, rag, cache, scoring
+│   ├── routers/              # dependencies, env_sheriff, pr_risk, assign, translate
+│   └── models/               # Pydantic schemas, DB layer
+│
+└── node-service/
+    ├── index.js              # Express entry point + API routes
+    └── utils/
+        ├── stryker.js        # Custom mutation testing engine (string-based)
+        └── jest-runner.js    # Jest execution + result parsing
+```
 
 ---
 
-## 💡 Final Thought
+## Backend API Reference
 
-DeployGuard AI isn’t about scaling model size for the sake of it.
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/jobs` | Start full pipeline — returns `job_id` |
+| `POST` | `/api/deploy-only` | Deployment-only pipeline |
+| `GET` | `/api/jobs/{job_id}/stream` | SSE stream of live pipeline events |
+| `GET` | `/api/jobs/{job_id}/report` | Final report JSON |
+| `GET` | `/api/deployment/{job_id}/status` | Deployment status |
+| `POST` | `/api/deps/analyze` | Start dependency audit |
+| `GET` | `/api/deps/status/{job_id}` | Dependency audit results |
+| `POST` | `/api/sheriff/analyze` | Scan repo for secrets |
+| `GET` | `/api/sheriff/status/{job_id}` | Sheriff findings + `.env.example` |
+| `POST` | `/api/pr/repo/prs` | Fetch PRs from GitHub |
+| `POST` | `/api/pr/analyze` | LLM-based PR risk analysis |
+| `POST` | `/api/pr/merge` | Merge PR via GitHub API |
+| `POST` | `/api/assign/fetch-contributors` | Fetch contributors + language data |
+| `POST` | `/api/assign/assign-task` | AI task assignment |
+| `POST` | `/api/translate` | Natural language → CLI command |
 
-It’s about engineering systems that extract maximum capability from minimal resources — efficiently, reliably, and intelligently.
+---
+
+## Node Service API
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/run-mutation` | Run mutation testing on repo |
+| `POST` | `/run-tests` | Execute full Jest test suite |
+| `POST` | `/run-single-test` | Run one AI-generated test against a mutant |
+| `GET` | `/health` | Health check |
+
+The Node service is an internal execution sandbox. The frontend never talks to it directly — only the Python backend does.
+
+---
+
+## Real-Time Pipeline (SSE)
+
+Once a job is created, the frontend connects to the SSE stream and receives live events:
+
+```
+POST /api/jobs → { job_id }
+                      │
+                      ▼
+GET /api/jobs/{job_id}/stream (text/event-stream)
+    ├── ADD_LOG
+    ├── SET_STAGE
+    ├── SET_PROGRESS
+    ├── ADD_AGENT_EVENT
+    └── COMPLETE
+```
+
+The dashboard uses `useReducer` to handle all incoming events and update UI state without full re-renders.
+
+---
+
+## Mutation Testing
+
+DeployGuard includes a custom lightweight mutation testing engine (`utils/stryker.js`) — not a wrapper around official Stryker.
+
+It works by:
+1. Scanning source files recursively (excluding `node_modules` and test files)
+2. Injecting mutations via string manipulation (`===` → `!==`, `>` → `<`, arithmetic flips)
+3. Running the test suite against each mutant in batched concurrent runs
+4. Reporting killed vs. survived mutants with a final mutation score
+
+Final reliability score formula used in the dashboard:
+
+```
+Score = (0.5 × mutation_score) + (0.3 × test_effectiveness) + (0.2 × deployment_success)
+```
+
+---
+
+## Limitations
+
+- Mutation engine uses string substitution, not AST — complex mutations are not supported
+- No persistent storage in the current backend DB layer (mock)
+- Node service has no caching — every mutation run re-executes from scratch
+- Vercel deployment requires a valid `VERCEL_TOKEN` with appropriate project permissions
+
+---
+
+## Contributing
+
+Contributions are welcome, but the bar is high.
+
+- Follow the existing architecture and pipeline patterns
+- Keep code modular — agents handle intelligence, services handle infrastructure
+- Do not add unnecessary dependencies or over-engineer solutions
+- Low-quality or inconsistent PRs will not be merged
+
+---
+
+## License
+
+MIT License
